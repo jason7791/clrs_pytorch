@@ -126,18 +126,18 @@ class PGN(Processor):
         # Concatenate node features and hidden features
         z = torch.cat([node_fts, hidden], dim=-1)  # Shape: (B, N, F_z)
 
-        m_1 = nn.LazyLinear(self.mid_size)
-        m_2 = nn.LazyLinear(self.mid_size)
-        m_e = nn.LazyLinear(self.mid_size)
-        m_g = nn.LazyLinear(self.mid_size)
+        self.m_1 = nn.LazyLinear(self.mid_size)
+        self. m_2 = nn.LazyLinear(self.mid_size)
+        self.m_e = nn.LazyLinear(self.mid_size)
+        self.m_g = nn.LazyLinear(self.mid_size)
 
-        o1 = nn.LazyLinear(self.out_size)
-        o2 = nn.LazyLinear(self.out_size)
+        self.o1 = nn.LazyLinear(self.out_size)
+        self.o2 = nn.LazyLinear(self.out_size)
 
-        msg_1 = m_1(z)
-        msg_2 = m_2(z)
-        msg_e = m_e(edge_fts)
-        msg_g = m_g(graph_fts)
+        msg_1 = self.m_1(z)
+        msg_2 = self.m_2(z)
+        msg_e = self.m_e(edge_fts)
+        msg_g = self.m_g(graph_fts)
 
         tri_msgs = None
 
@@ -179,9 +179,9 @@ class PGN(Processor):
 
 
         # Compute output
-        h_1 = o1(z)  # Shape: (B, N, F_out)
+        h_1 = self.o1(z)  # Shape: (B, N, F_out)
 
-        h_2 = o2(msgs)  # Shape: (B, N, F_out)
+        h_2 = self.o2(msgs)  # Shape: (B, N, F_out)
 
 
         ret = h_1 + h_2  # Shape: (B, N, F_out)
@@ -191,8 +191,8 @@ class PGN(Processor):
 
         if self.use_ln:
             # Define LayerNorm
-            ln = nn.LayerNorm(ret.size(-1))  # Normalize across the last dimension
-            ret = ln(ret)  # Apply LayerNorm to `ret`
+            self.ln = nn.LayerNorm(ret.size(-1))  # Normalize across the last dimension
+            ret = self.ln(ret)  # Apply LayerNorm to `ret`
 
         return ret, tri_msgs  # Updated node embeddings and triplet messages
 

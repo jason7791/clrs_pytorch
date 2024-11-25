@@ -127,7 +127,7 @@ class Net(nn.Module):
     self.use_lstm = use_lstm
     self.encoder_init = encoder_init
     self.nb_msg_passing_steps = nb_msg_passing_steps
-    self.layers = nn.ModuleList()  # Register a list of layers
+    self.layers = list() #nn.ModuleList()  # Register a list of layers
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,

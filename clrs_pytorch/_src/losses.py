@@ -58,18 +58,18 @@ def output_loss_chunked(truth: _DataPoint, pred: _Array,
     mask = (truth.data != _OutputClass.MASKED)
 
   elif truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
-    mask = torch.any(truth.data == _OutputClass.POSITIVE, axis=-1)
+    mask = torch.any(truth.data == _OutputClass.POSITIVE, dim=-1)
     masked_truth = truth.data * (truth.data != _OutputClass.MASKED).float()
-    loss = -torch.sum(masked_truth * torch.nn.functional.log_softmax(pred), axis=-1)
+    loss = -torch.sum(masked_truth * torch.nn.functional.log_softmax(pred), dim=-1)
 
   elif truth.type_ == _Type.POINTER:
     loss = -torch.sum(
-        torch.nn.functional.one_hot(truth.data, nb_nodes) * torch.nn.functional.log_softmax(pred), axis=-1)
+        torch.nn.functional.one_hot(truth.data, nb_nodes) * torch.nn.functional.log_softmax(pred), dim=-1)
 
   elif truth.type_ == _Type.PERMUTATION_POINTER:
     # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
     # Compute the cross entropy between doubly stochastic pred and truth_data
-    loss = -torch.sum(truth.data * pred, axis=-1)
+    loss = -torch.sum(truth.data * pred, dim=-1)
 
   if mask is not None:
     mask = mask * _expand_and_broadcast_to(is_last, loss)
@@ -94,19 +94,19 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
 
   elif truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
     masked_truth = truth.data * (truth.data != _OutputClass.MASKED).float()
-    total_loss = (-torch.sum(masked_truth * torch.nn.functional.log_softmax(pred)) /
+    total_loss = (-torch.sum(masked_truth * torch.nn.functional.log_softmax(pred, dim = -1)) /
                   torch.sum(truth.data == _OutputClass.POSITIVE))
 
   elif truth.type_ == _Type.POINTER:
     total_loss = (
         torch.mean(-torch.sum(
-            torch.nn.functional.one_hot(torch.tensor(truth.data), nb_nodes) * torch.nn.functional.log_softmax(pred),
-            axis=-1)))
+            torch.nn.functional.one_hot(torch.tensor(truth.data), nb_nodes) * torch.nn.functional.log_softmax(pred, dim = -1),
+            dim=-1)))
 
   elif truth.type_ == _Type.PERMUTATION_POINTER:
     # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
     # Compute the cross entropy between doubly stochastic pred and truth_data
-    total_loss = torch.mean(-torch.sum(truth.data * pred, axis=-1))
+    total_loss = torch.mean(-torch.sum(truth.data * pred, dim=-1))
 
   return total_loss  # pytype: disable=bad-return-type  
 
@@ -159,22 +159,22 @@ def _hint_loss(
     mask = torch.tensor(truth_data != _OutputClass.MASKED).float()  # pytype: disable=attribute-error  # numpy-scalars
 
   elif truth_type == _Type.MASK_ONE:
-    loss = -torch.sum(truth_data * torch.nn.functional.log_softmax(pred), axis=-1,
+    loss = -torch.sum(truth_data * torch.nn.functional.log_softmax(pred), dim=-1,
                     keepdims=True)
 
   elif truth_type == _Type.CATEGORICAL:
-    loss = -torch.sum(truth_data * torch.nn.functional.log_softmax(pred), axis=-1)
-    mask = torch.any(truth_data == _OutputClass.POSITIVE, axis=-1).float()
+    loss = -torch.sum(truth_data * torch.nn.functional.log_softmax(pred), dim=-1)
+    mask = torch.any(truth_data == _OutputClass.POSITIVE, dim=-1).float()
 
   elif truth_type == _Type.POINTER:
     loss = -torch.sum(
-        torch.nn.functional.one_hot(torch.tensor(truth_data).long(), nb_nodes) * torch.nn.functional.log_softmax(pred),
-        axis=-1)
+        torch.nn.functional.one_hot(torch.tensor(truth_data).long(), nb_nodes) * torch.nn.functional.log_softmax(pred, dim = -1),
+        dim=-1)
 
   elif truth_type == _Type.PERMUTATION_POINTER:
     # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
     # Compute the cross entropy between doubly stochastic pred and truth_data
-    loss = -torch.sum(truth_data * pred, axis=-1)
+    loss = -torch.sum(truth_data * pred, dim=-1)
 
   if mask is None:
     mask = torch.ones_like(loss)

@@ -190,7 +190,11 @@ class BaselineModel(model.Model):
     lss = self._loss(feedback, algorithm_index)
     self.opt.zero_grad()
     lss.backward()
+    before_update = [param.clone() for param in self.net_fn.parameters()]
     self.opt.step()
+    after_update = [param.clone() for param in self.net_fn.parameters()]
+    for i, (before, after) in enumerate(zip(before_update, after_update)):
+        print(f"Param {i} change: {(after - before).abs().max().item()}")
     return lss 
 
   def _predict(self,  features: _Features,
@@ -269,7 +273,7 @@ class BaselineModel(model.Model):
       total_loss += loss  # Accumulate loss
     print("total loss after output loss", total_loss)
     # Optionally accumulate hint losses.
-    if not self.decode_hints:
+    if self.decode_hints:
       for truth in feedback.features.hints:
         loss = losses.hint_loss(
             truth=truth,
