@@ -16,10 +16,7 @@ from clrs_pytorch._src import processors
 from clrs_pytorch._src import samplers
 from clrs_pytorch._src import specs
 
-import haiku as hk
-import jax
 import numpy as np
-import optax
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -159,25 +156,6 @@ class BaselineModel(model.Model):
                                    return_all_outputs=False)
     self.opt = optim.Adam(self.net_fn.parameters(),lr=self.learning_rate)
 
-  @property
-  def params(self):
-    if self._device_params is None:
-      return None
-    return self._device_params
-
-  @params.setter
-  def params(self, params):
-    self._device_params = params
-
-  @property
-  def opt_state(self):
-    if self._device_opt_state is None:
-      return None
-    return self._device_opt_state
-
-  @opt_state.setter
-  def opt_state(self, opt_state):
-    self._device_opt_state = opt_state
 
   def _compute_grad(self, feedback, algorithm_index):
     self.net_fn.zero_grad()
@@ -286,12 +264,6 @@ class BaselineModel(model.Model):
 
     return total_loss
 
-  def update_model_params_accum(self, grads) -> None:
-    grads = grads
-    self._device_params, self._device_opt_state = accum_opt_update(
-        self._device_params, grads, self._device_opt_state, self.opt,
-        self._freeze_processor)
-
   def verbose_loss(self, feedback: _Feedback, extra_info) -> Dict[str, _Array]:
     """Gets verbose loss information."""
     hint_preds = extra_info
@@ -319,17 +291,12 @@ class BaselineModel(model.Model):
     path = os.path.join(self.checkpoint_path, file_name)
     with open(path, 'rb') as f:
       restored_state = pickle.load(f)
-      if only_load_processor:
-        restored_params = _filter_in_processor(restored_state['params'])
-      else:
-        restored_params = restored_state['params']
-      self.params = hk.data_structures.merge(self.params, restored_params)
-      self.opt_state = restored_state['opt_state']
+      self.load_state_dict(restored_state['params'])
 
   def save_model(self, file_name: str):
     """Save model (processor weights only) to `file_name`"""
     os.makedirs(self.checkpoint_path, exist_ok=True)
-    to_save = {'params': self.params, 'opt_state': self.opt_state}
+    to_save = {'params': self.net_fn.parameters()}
     path = os.path.join(self.checkpoint_path, file_name)
     with open(path, 'wb') as f:
       pickle.dump(to_save, f)
@@ -343,44 +310,3 @@ def _nb_nodes(feedback: _Feedback, is_chunked) -> int:
       else:
         return inp.data.shape[1]  # inputs are batch x nodes x ...
   assert False
-
-
-def _param_in_processor(module_name):
-  return processors.PROCESSOR_TAG in module_name
-
-
-def _filter_out_processor(params: hk.Params) -> hk.Params:
-  return hk.data_structures.filter(
-      lambda module_name, n, v: not _param_in_processor(module_name), params)
-
-
-def _filter_in_processor(params: hk.Params) -> hk.Params:
-  return hk.data_structures.filter(
-      lambda module_name, n, v: _param_in_processor(module_name), params)
-
-
-
-def accum_opt_update(params, grads, opt_state, opt, freeze_processor):
-  """Update params from gradients collected from several algorithms."""
-  # Average the gradients over all algos
-  grads = jax.tree_util.tree_map(
-      lambda *x: sum(x) / (sum([torch.any(k) for k in x]) + 1e-12), *grads)
-  updates, opt_state = opt.update(grads, opt_state)
-  if freeze_processor:
-    params_subset = _filter_out_processor(params)
-    assert len(params) > len(params_subset)
-    assert params_subset
-    updates_subset = _filter_out_processor(updates)
-    new_params = optax.apply_updates(params_subset, updates_subset)
-    new_params = hk.data_structures.merge(params, new_params)
-  else:
-    new_params = optax.apply_updates(params, updates)
-
-  return new_params, opt_state
-
-
-@functools.partial(jax.jit, static_argnames=['opt'])
-def opt_update(opt, flat_grads, flat_opt_state):
-  return opt.update(flat_grads, flat_opt_state)
-
-
