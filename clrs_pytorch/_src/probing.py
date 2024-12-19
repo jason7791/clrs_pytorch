@@ -28,16 +28,15 @@ from typing import Dict, List, Tuple, Union
 
 import attr
 from clrs_pytorch._src import specs
-import jax
 import numpy as np
 import tensorflow as tf
 import torch
+import jax 
 
 _Location = specs.Location
 _Stage = specs.Stage
 _Type = specs.Type
 _OutputClass = specs.OutputClass
-
 _Array = np.ndarray | torch.Tensor
 _Data = Union[_Array, List[_Array]]
 _DataOrType = Union[_Data, str]
@@ -54,9 +53,6 @@ def _convert_to_str(element):
   else:
     return element
 
-
-# First anotation makes this object jax.jit/pmap friendly, second one makes this
-# tf.data.Datasets friendly.
 @jax.tree_util.register_pytree_node_class
 @attr.define
 class DataPoint:
@@ -311,8 +307,9 @@ def strings_pred(T_pos: np.ndarray, P_pos: np.ndarray) -> np.ndarray:
   return probe
 
 
+@functools.partial(np.vectorize, signature='(n)->(n,n)')
 def predecessor_pointers_to_permutation_matrix(
-    pointers: torch.Tensor) ->  torch.Tensor:
+    pointers: np.ndarray) -> np.ndarray:
   """Converts predecessor pointers to a permutation matrix.
 
   This function assumes that the pointers represent a linear order of the nodes
@@ -339,26 +336,24 @@ def predecessor_pointers_to_permutation_matrix(
   """
   # Find the index of the last node: it's the node that no other node points to.
   nb_nodes = pointers.shape[-1]
-  pointers_one_hot = torch.nn.functional.one_hot(pointers, num_classes=nb_nodes).float()
+  pointers_one_hot = torch.nn.functional.one_hot(pointers, nb_nodes)
   last = pointers_one_hot.sum(-2).argmin()
 
   # Initialize permutation matrix with zeros.
-  perm = torch.zeros([nb_nodes, nb_nodes])
+  perm = np.zeros([nb_nodes, nb_nodes])
+
   for i in range(nb_nodes - 1, -1, -1):
-      # Update the permutation matrix.
-      perm += (
-          torch.nn.functional.one_hot(i, num_classes=nb_nodes).unsqueeze(0) * 
-          torch.nn.functional.one_hot(last, num_classes=nb_nodes).float()
-      )
-      last = pointers[last].item()  # Move to the predecessor index
+    # perm[i, last] = 1
+    perm += (
+        torch.nn.functional.one_hot(i, nb_nodes)[..., None] * torch.nn.functional.one_hot(last, nb_nodes))
+    last = pointers[last]
 
   return perm
 
 
-
-
+@functools.partial(np.vectorize, signature='(n,n)->(n)')
 def permutation_matrix_to_predecessor_pointers(
-    perm: torch.Tensor) -> torch.Tensor:
+    perm: np.ndarray) -> np.ndarray:
   """Converts a permutation matrix to predecessor pointers.
 
   Given an [N, N] permutation matrix `P` that sorts a list of nodes, this
@@ -381,7 +376,7 @@ def permutation_matrix_to_predecessor_pointers(
   nb_nodes = perm.shape[-1]
 
   # Initialize pointers to zeros.
-  pointers = torch.zeros([nb_nodes], dtype=int)
+  pointers = np.zeros([nb_nodes], dtype=int)
 
   # idx[i] is the index of the node at position i in the sorted order
   idx = perm.argmax(-1)
@@ -395,43 +390,45 @@ def permutation_matrix_to_predecessor_pointers(
 
   # Ensure that the pointers are in the valid range even if the input is badly
   # formatted. This has no effect for well-formatted input.
-  pointers = torch.minimum(pointers, nb_nodes - 1)
+  pointers = np.minimum(pointers, nb_nodes - 1)
 
   return pointers
 
 
+@functools.partial(np.vectorize, signature='(n)->(n,n),(n)')
 def predecessor_to_cyclic_predecessor_and_first(
-    pointers: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Converts predecessor pointers to cyclic predecessor + first node mask.
+    pointers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+  """Converts predecessor pointers to cyclic predecessor + first node mask.
 
-    This function assumes that the pointers represent a linear order of the nodes
-    (akin to a linked list), where each node points to its predecessor and the
-    first node points to itself. It returns the same pointers, except that
-    the first node points to the last, and a mask_one marking the first node.
+  This function assumes that the pointers represent a linear order of the nodes
+  (akin to a linked list), where each node points to its predecessor and the
+  first node points to itself. It returns the same pointers, except that
+  the first node points to the last, and a mask_one marking the first node.
 
-    Args:
-        pointers: tensor of shape [N] containing pointers. The pointers are assumed
-        to describe a linear order such that `pointers[i]` is the predecessor
-        of node `i`.
+  Example:
+  ```
+  pointers = [2, 1, 1]
+  P = [[0, 0, 1],
+       [1, 0, 0],
+       [0, 1, 0]],
+  M = [0, 1, 0]
+  ```
 
-    Returns:
-        Permutation pointers `P` of shape [N] and one-hot vector `M` of shape [N].
-    """
-    nb_nodes = pointers.shape[-1]
-    
-    # Create one-hot encoding of pointers
-    pointers_one_hot = torch.nn.functional.one_hot(pointers, num_classes=nb_nodes).float()
+  Args:
+    pointers: array of shape [N] containing pointers. The pointers are assumed
+      to describe a linear order such that `pointers[i]` is the predecessor
+      of node `i`.
 
-    # Find the index of the last node: it's the node that no other node points to.
-    last = pointers_one_hot.sum(dim=0).argmin().item()  # Convert to a Python int
-    # Find the first node: should be the only one pointing to itself.
-    first = pointers_one_hot.diagonal().argmax().item()  # Convert to a Python int
-
-    # Create one-hot vector for the first node
-    mask = torch.nn.functional.one_hot(first, num_classes=nb_nodes).float()
-
-    # Update pointers_one_hot according to the logic in the JAX version
-    pointers_one_hot += mask.unsqueeze(0) * torch.nn.functional.one_hot(last, num_classes=nb_nodes).float()
-    pointers_one_hot -= mask.unsqueeze(0) * mask
-    
-    return pointers_one_hot, mask
+  Returns:
+    Permutation pointers `P` of shape [N] and one-hot vector `M` of shape [N].
+  """
+  nb_nodes = pointers.shape[-1]
+  pointers_one_hot = torch.nn.functional.one_hot(pointers, nb_nodes)
+  # Find the index of the last node: it's the node that no other node points to.
+  last = pointers_one_hot.sum(-2).argmin()
+  # Find the first node: should be the only one pointing to itself.
+  first = pointers_one_hot.diagonal().argmax()
+  mask = torch.nn.functional.one_hot(first, nb_nodes)
+  pointers_one_hot += mask[..., None] * torch.nn.functional.one_hot(last, nb_nodes)
+  pointers_one_hot -= mask[..., None] * mask
+  return pointers_one_hot, mask

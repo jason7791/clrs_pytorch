@@ -14,7 +14,6 @@
 # ==============================================================================
 """decoders utilities."""
 
-import functools
 from typing import Dict, Optional
 
 from clrs_pytorch._src import probing
@@ -117,15 +116,15 @@ def construct_diff_decoders(name: str):
     decoders = nn.ModuleDict()  # Use ModuleDict to store layers
 
     # Define the linear layers and add them to the decoders
-    decoders[_Location.NODE] = nn.Linear(1, 1)  # Node decoder
+    decoders[_Location.NODE] = nn.LazyLinear( 1)  # Node decoder
     decoders[_Location.EDGE] = nn.ModuleList([
-        nn.Linear(1, 1),  # Edge decoder 1
-        nn.Linear(1, 1),  # Edge decoder 2
-        nn.Linear(1, 1)   # Edge decoder 3
+        nn.LazyLinear(1),  # Edge decoder 1
+        nn.LazyLinear(1),  # Edge decoder 2
+        nn.LazyLinear(1)   # Edge decoder 3
     ])
     decoders[_Location.GRAPH] = nn.ModuleList([
-        nn.Linear(1, 1),  # Graph decoder 1
-        nn.Linear(1, 1)   # Graph decoder 2
+        nn.LazyLinear(1),  # Graph decoder 1
+        nn.LazyLinear(1)   # Graph decoder 2
     ])
 
     return decoders
@@ -200,7 +199,6 @@ def postprocess(spec: _Spec, preds: Dict[str, _Array],
 
     return result
 
-
 def decode_fts(
     decoders,
     spec: _Spec,
@@ -212,33 +210,36 @@ def decode_fts(
     inf_bias_edge: bool,
     repred: bool,
 ):
-  """Decodes node, edge and graph features."""
-  output_preds = {}
-  hint_preds = {}
+    """Decodes node, edge, and graph features."""
+    output_preds = {}
+    hint_preds = {}
 
-  for name in decoders:
-    decoder = decoders[name]
-    stage, loc, t = spec[name]
+    for name in decoders:
+        decoder = decoders[name]
+        stage, loc, t = spec[name]
 
-    if loc == _Location.NODE:
-      preds = _decode_node_fts(decoder, t, h_t, edge_fts, adj_mat,
-                               inf_bias, repred)
-    elif loc == _Location.EDGE:
-      preds = _decode_edge_fts(decoder, t, h_t, edge_fts, adj_mat,
-                               inf_bias_edge)
-    elif loc == _Location.GRAPH:
-      preds = _decode_graph_fts(decoder, t, h_t, graph_fts)
-    else:
-      raise ValueError("Invalid output type")
+        if loc == _Location.NODE:
+            preds = _decode_node_fts(decoder, t, h_t, edge_fts, adj_mat,
+                                     inf_bias, repred)
 
-    if stage == _Stage.OUTPUT:
-      output_preds[name] = preds
-    elif stage == _Stage.HINT:
-      hint_preds[name] = preds
-    else:
-      raise ValueError(f"Found unexpected decoder {name}")
+        elif loc == _Location.EDGE:
+            preds = _decode_edge_fts(decoder, t, h_t, edge_fts, adj_mat,
+                                     inf_bias_edge)
 
-  return hint_preds, output_preds
+        elif loc == _Location.GRAPH:
+            preds = _decode_graph_fts(decoder, t, h_t, graph_fts)
+
+        else:
+            raise ValueError("Invalid output type")
+
+        if stage == _Stage.OUTPUT:
+            output_preds[name] = preds
+        elif stage == _Stage.HINT:
+            hint_preds[name] = preds
+        else:
+            raise ValueError(f"Found unexpected decoder {name}")
+
+    return hint_preds, output_preds
 
 
 def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
@@ -259,7 +260,7 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
     preds = torch.squeeze(decoders[3](p_m), -1)
 
     if inf_bias:
-      per_batch_min = torch.min(preds, axis=range(1, preds.ndim), keepdims=True)
+      per_batch_min = torch.min(preds, dim=range(1, preds.ndim), keepdims=True)
       preds = torch.where(adj_mat > 0.5,
                         preds,
                         torch.minimum(-1.0, per_batch_min - 1.0))
@@ -301,7 +302,7 @@ def _decode_edge_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
   else:
     raise ValueError("Invalid output type")
   if inf_bias_edge and t in [_Type.MASK, _Type.MASK_ONE]:
-    per_batch_min = torch.min(preds, axis=range(1, preds.ndim), keepdims=True)
+    per_batch_min = torch.min(preds, dim=range(1, preds.ndim), keepdims=True)
     preds = torch.where(adj_mat > 0.5,
                       preds,
                       torch.minimum(-1.0, per_batch_min - 1.0))
@@ -313,7 +314,7 @@ def _decode_graph_fts(decoders, t: str, h_t: _Array,
                       graph_fts: _Array) -> _Array:
   """Decodes graph features."""
 
-  gr_emb = torch.max(h_t, axis=-2)
+  gr_emb, _ = torch.max(h_t, dim=-2)
   pred_n = decoders[0](gr_emb)
   pred_g = decoders[1](graph_fts)
   pred = pred_n + pred_g
@@ -377,7 +378,7 @@ def _decode_edge_diffs(decoders, h_t: _Array, edge_fts: _Array) -> _Array:
 def _decode_graph_diffs(decoders, h_t: _Array, graph_fts: _Array) -> _Array:
   """Decodes graph diffs."""
 
-  gr_emb = torch.max(h_t, axis=-2)
+  gr_emb = torch.max(h_t, dim=-2)
   g_pred_n = decoders[0](gr_emb)
   g_pred_g = decoders[1](graph_fts)
   preds = torch.squeeze(g_pred_n + g_pred_g, -1)

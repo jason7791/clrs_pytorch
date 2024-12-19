@@ -18,15 +18,12 @@ from typing import Dict, List, Tuple
 import chex
 from clrs_pytorch._src import probing
 from clrs_pytorch._src import specs
-
+import numpy as np
 import torch
 
 _Array = chex.Array
 _DataPoint = probing.DataPoint
-_Location = specs.Location
 _OutputClass = specs.OutputClass
-_PredTrajectory = Dict[str, _Array]
-_PredTrajectories = List[_PredTrajectory]
 _Type = specs.Type
 
 EPS = 1e-12
@@ -81,32 +78,34 @@ def output_loss_chunked(truth: _DataPoint, pred: _Array,
 
 def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
   """Output loss for full-sample training."""
+  if isinstance(truth.data, np.ndarray):
+      truth_data = torch.tensor(truth.data,dtype=torch.float32, device=pred.device)
+  else:
+      truth_data = truth.data.detach().to(pred.device)
 
   if truth.type_ == _Type.SCALAR:
-    total_loss = torch.mean((pred - truth.data)**2)
+    total_loss = torch.mean((pred - truth_data)**2)
 
   elif truth.type_ == _Type.MASK:
     loss = (
-        torch.maximum(pred, 0) - pred * truth.data +
+        torch.maximum(pred, torch.tensor(0.0, device=pred.device)) - pred * truth_data +
         torch.log1p(torch.exp(-torch.abs(pred))))
-    mask = (truth.data != _OutputClass.MASKED).float()
+    mask = (truth_data != _OutputClass.MASKED).float()
     total_loss = torch.sum(loss * mask) / torch.sum(mask)
 
   elif truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
-    masked_truth = truth.data * (truth.data != _OutputClass.MASKED).float()
+    masked_truth = truth_data * (truth_data != _OutputClass.MASKED).float()
     total_loss = (-torch.sum(masked_truth * torch.nn.functional.log_softmax(pred, dim = -1)) /
-                  torch.sum(truth.data == _OutputClass.POSITIVE))
+                  torch.sum(truth_data == _OutputClass.POSITIVE))
 
   elif truth.type_ == _Type.POINTER:
-    total_loss = (
-        torch.mean(-torch.sum(
-            torch.nn.functional.one_hot(torch.tensor(truth.data), nb_nodes) * torch.nn.functional.log_softmax(pred, dim = -1),
-            dim=-1)))
+    one_hot_truth = torch.nn.functional.one_hot(truth_data.to(dtype=torch.long), nb_nodes).float()
+    total_loss = torch.mean(-torch.sum(one_hot_truth * torch.nn.functional.log_softmax(pred, dim=-1), dim=-1))
 
   elif truth.type_ == _Type.PERMUTATION_POINTER:
     # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
     # Compute the cross entropy between doubly stochastic pred and truth_data
-    total_loss = torch.mean(-torch.sum(truth.data * pred, dim=-1))
+    total_loss = torch.mean(-torch.sum(truth_data * pred, dim=-1))
 
   return total_loss  # pytype: disable=bad-return-type  
 
@@ -115,12 +114,10 @@ def hint_loss(
     truth: _DataPoint,
     preds: List[_Array],
     lengths: _Array,
-    nb_nodes: int,
-    verbose: bool = False,
+    nb_nodes: int
 ):
   """Hint loss for full-sample training."""
   total_loss = 0.
-  verbose_loss = {}
   length = truth.data.shape[0] - 1
 
   loss, mask = _hint_loss(
@@ -131,12 +128,10 @@ def hint_loss(
   )
   mask *= _is_not_done_broadcast(lengths, torch.arange(length)[:, None], loss)
   loss = torch.sum(loss * mask) / torch.maximum(torch.sum(mask), torch.tensor(EPS))
-  if verbose:
-    verbose_loss['loss_' + truth.name] = loss
-  else:
-    total_loss += loss
 
-  return verbose_loss if verbose else total_loss
+  total_loss += loss
+
+  return total_loss
 
 
 def _hint_loss(

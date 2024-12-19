@@ -106,7 +106,9 @@ class Sampler(abc.ABC):
     self._track_max_steps = track_max_steps
 
     if num_samples < 0:
-      logging.warning('Sampling dataset on-the-fly, unlimited samples.')
+      logging.log_first_n(
+          logging.WARNING, 'Sampling dataset on-the-fly, unlimited samples.', 1
+      )
       if track_max_steps:
         # Get an initial estimate of max hint length
         self.max_steps = -1
@@ -507,12 +509,6 @@ class BellmanFordSampler(Sampler):
         low=low,
         high=high)
     source_node = self._rng.choice(length)
-    #for debugging purposes, set to same graph and source node
-    graph = np.array([[0.44036833, 0.18692881, 0.64573253, 0.29635826],
-       [0.18692881, 0.69092651, 0.44760056, 0.46790547],
-       [0.64573253, 0.44760056, 0.96406055, 0.        ],
-       [0.29635826, 0.46790547, 0.        , 0.95938323]])
-    source_node = 2
     return [graph, source_node]
 
 

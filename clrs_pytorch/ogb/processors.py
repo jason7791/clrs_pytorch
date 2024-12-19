@@ -21,14 +21,12 @@ from typing import Any, Callable, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+
 
 # Type aliases for better readability
 _Array = torch.Tensor
-_Fn = Callable[..., Any]
 BIG_NUMBER = 1e6
 PROCESSOR_TAG = 'clrs_processor'
-
 
 class Processor(nn.Module):
   """Processor abstract base class."""
@@ -72,6 +70,7 @@ class Processor(nn.Module):
   @property
   def inf_bias_edge(self):
     return False
+
 
 class PGN(Processor):
     """Pointer Graph Networks (Veličković et al., NeurIPS 2020)."""
@@ -123,6 +122,7 @@ class PGN(Processor):
             self.mlp = nn.Sequential(*mlp_layers)
             
         self.ln = None  # Placeholder for LayerNorm
+
     def forward(
         self,
         node_fts: _Array,
@@ -154,7 +154,7 @@ class PGN(Processor):
             msg_1.unsqueeze(1) + msg_2.unsqueeze(2) +
             msg_e + msg_g.unsqueeze(1).unsqueeze(2)
         )  # Shape: (B, N, N, F_mid)
-
+        assert not torch.isnan(msgs).any(), "NaN detected in aggregated messages"
         if self._msgs_mlp_sizes is not None:
             msgs = self.mlp(F.relu(msgs))
 
@@ -175,6 +175,8 @@ class PGN(Processor):
         else:
             # Perform custom reduction
             msgs = self.reduction(msgs * adj_mat.unsqueeze(-1), dim=1)
+        assert not torch.isnan(msgs).any(), "NaN detected after reduction"
+
         # Compute output
         h_1 = self.o1(z)  # Shape: (B, N, F_out)
         h_2 = self.o2(msgs)  # Shape: (B, N, F_out)
@@ -187,7 +189,7 @@ class PGN(Processor):
             ret = self.ln(ret)  # Apply LayerNorm
 
         return ret, tri_msgs  # Updated node embeddings and triplet messages
-
+    
 
 class MPNN(PGN):
     """Message-Passing Neural Network (Gilmer et al., ICML 2017)."""
@@ -203,100 +205,4 @@ class MPNN(PGN):
     ) -> Tuple[_Array, Optional[_Array]]:
         adj_mat = torch.ones_like(adj_mat)
         return super().forward(node_fts, edge_fts, graph_fts, adj_mat, hidden, **unused_kwargs)
-
-
-ProcessorFactory = Callable[[int], Processor]
-
-
-def get_processor_factory(
-    kind: str,
-    use_ln: bool,
-    nb_triplet_fts: int,
-    nb_heads: Optional[int] = None
-) -> ProcessorFactory:
-    """Returns a processor factory.
-
-    Args:
-      kind: One of the available types of processor.
-      use_ln: Whether the processor passes the output through a layernorm layer.
-      nb_triplet_fts: How many triplet features to compute.
-      nb_heads: Number of attention heads for GAT processors.
-    Returns:
-      A callable that takes an `out_size` parameter (equal to the hidden
-      dimension of the network) and returns a processor instance.
-    """
-    def _factory(out_size: int) -> Processor:
-        if kind == 'mpnn':
-            processor = MPNN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=False,
-                nb_triplet_fts=0,
-            )
-        elif kind == 'pgn':
-            processor = PGN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=False,
-                nb_triplet_fts=0,
-            )
-        elif kind == 'triplet_mpnn':
-            processor = MPNN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=True,
-                nb_triplet_fts=nb_triplet_fts,
-            )
-        elif kind == 'triplet_pgn':
-            processor = PGN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=True,
-                nb_triplet_fts=nb_triplet_fts,
-            )
-        elif kind == 'gpgn':
-            processor = PGN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=False,
-                nb_triplet_fts=nb_triplet_fts,
-                gated=True,
-            )
-        elif kind == 'gmpnn':
-            processor = MPNN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=False,
-                nb_triplet_fts=nb_triplet_fts,
-                gated=True,
-            )
-        elif kind == 'triplet_gpgn':
-            processor = PGN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=True,
-                nb_triplet_fts=nb_triplet_fts,
-                gated=True,
-            )
-        elif kind == 'triplet_gmpnn':
-            processor = MPNN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=True,
-                nb_triplet_fts=nb_triplet_fts,
-                gated=True,
-            )
-        else:
-            raise ValueError(f'Unexpected processor kind {kind}')
-
-        return processor
-
-    return _factory
+    

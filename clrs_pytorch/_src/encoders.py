@@ -22,6 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import torch.nn.init as init
+import numpy as np
 
 _Array = torch.Tensor
 _DataPoint = probing.DataPoint
@@ -34,35 +35,37 @@ _Type = specs.Type
 def construct_encoders(stage: str, loc: str, t: str,
                        hidden_dim: int, init: str, name: str):
     """Constructs encoders in PyTorch."""
+    
     # Define initializer
-    if init == 'xavier_on_scalars' and stage == 'HINT' and t == 'SCALAR':
-        # Use TruncatedNormal equivalent for initialization
-        def truncated_normal(tensor, stddev):
-            with torch.no_grad():
-                tensor.normal_(0, stddev)
-        
+    def truncated_normal_(tensor, stddev):
+        with torch.no_grad():
+            # Fill with values from a normal distribution
+            tensor.normal_(mean=0.0, std=stddev)
+            # Truncate values within 2 standard deviations
+            tensor.clamp_(-2 * stddev, 2 * stddev)
+
+    if init == 'xavier_on_scalars' and stage == '_Stage.HINT' and t == '_Type.SCALAR':
         stddev = 1.0 / math.sqrt(hidden_dim)
-        initialiser = lambda tensor: truncated_normal(tensor, stddev)
-        initialiser = None
+        initialiser = lambda tensor: truncated_normal_(tensor, stddev)
     elif init in ['default', 'xavier_on_scalars']:
         initialiser = None
     else:
         raise ValueError(f'Encoder initializer {init} not supported.')
 
-    # Create a Linear layer with custom initialization
-    def create_linear(out_features, name):
+    def create_linear(out_features: int) -> nn.Linear:
         layer = nn.Linear(1, out_features)
-        layer.name = name  # Add a name attribute for debugging
         if initialiser:
-            initialiser(layer.weight)  # Apply custom initializer to weights
-        nn.init.zeros_(layer.bias)  # Set bias to zeros (default in JAX)
+            initialiser(layer.weight) 
+        nn.init.zeros_(layer.bias)  
         return layer
-    encoders = nn.ModuleList()
-    # Define encoders
-    encoders.append(create_linear(hidden_dim, f"{name}_enc_linear"))
-    if loc == 'EDGE' and t == 'POINTER':
+    
+    def create_lazy_linear(out_features):
+       return nn.LazyLinear(out_features)
+    
+    encoders = nn.ModuleList([create_lazy_linear(hidden_dim)])
+    if loc == _Location.EDGE and t == _Type.POINTER:
         # Edge pointers need two-way encoders
-      encoders.append(create_linear(hidden_dim, f"{name}_enc_linear_2"))
+        encoders.append(create_lazy_linear(hidden_dim))
 
     return encoders
 
@@ -83,18 +86,20 @@ def preprocess(dp: _DataPoint, nb_nodes: int) -> _DataPoint:
     Returns:
         The datapoint, with data and possibly type modified.
     """
+      
+    if isinstance(dp.data, np.ndarray):
+      data = torch.tensor(dp.data,dtype=torch.float32)
+    else:
+      data = dp.data.detach()
     new_type = dp.type_
 
     if dp.type_ == _Type.POINTER:
-        # Convert to one-hot encoding
-        data = torch.nn.functional.one_hot(torch.tensor(dp.data, dtype=torch.long), num_classes=nb_nodes).float()
+        data = F.one_hot(data.long(), num_classes=nb_nodes).float()
     else:
-        # Convert to float if not a POINTER type
-        data = torch.tensor(dp.data, dtype=torch.float32)
+        data = data.float()
         if dp.type_ == _Type.SOFT_POINTER:
-            new_type = _Type.POINTER
+          new_type = _Type.POINTER
 
-    # Create a new DataPoint instance
     dp = probing.DataPoint(
         name=dp.name, location=dp.location, type_=new_type, data=data
     )
@@ -110,7 +115,7 @@ def accum_adj_mat(dp: _DataPoint, adj_mat: _Array) -> _Array:
   elif dp.location == _Location.EDGE and dp.type_ == _Type.MASK:
     adj_mat += ((dp.data + dp.data.permute(0,2,1)) > 0.0)
 
-  return (adj_mat > 0.).float() # pytype: disable=attribute-error  # numpy-scalars
+  return (adj_mat > 0.).float() 
 
 
 def accum_edge_fts(encoders, dp: _DataPoint, edge_fts: _Array) -> _Array:

@@ -1,3 +1,10 @@
 .vscode/
 clrs_pytorch_env/
 .DS_Store
+__pycache__/
+dataset/
+ogb_checkpoints/
+checkpoints/
+clrs_checkpoints/
+clrs_performance/
+clrs_pytorch/_src/__pycache__

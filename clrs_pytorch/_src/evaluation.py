@@ -136,7 +136,6 @@ def evaluate(
     evals[truth.name] = _evaluate(truth, pred)
   # Return a single scalar score that is the mean of all output scores.
   evals['score'] = sum([v.item() for v in evals.values()]) / len(evals)
-  print("evals", evals)
   return evals
 
 

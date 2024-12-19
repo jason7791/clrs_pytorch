@@ -13,12 +13,8 @@
 # limitations under the License.
 # ==============================================================================
 
-"""JAX implementation of CLRS basic network."""
-
-import functools
-
+"""Implementation of CLRS basic network."""
 from typing import Dict, List, Optional, Tuple
-
 
 from clrs_pytorch._src import decoders
 from clrs_pytorch._src import encoders
@@ -27,10 +23,8 @@ from clrs_pytorch._src import processors
 from clrs_pytorch._src import samplers
 from clrs_pytorch._src import specs
 
-import haiku as hk
 import jax
 from dataclasses import dataclass
-from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -38,7 +32,6 @@ import torch.nn.functional as F
 _Array = torch.Tensor
 _DataPoint = probing.DataPoint
 _Features = samplers.Features
-_FeaturesChunked = samplers.FeaturesChunked
 _Location = specs.Location
 _Spec = specs.Spec
 _Stage = specs.Stage
@@ -51,48 +44,9 @@ class _MessagePassingScanState:
     hint_preds: torch.Tensor  
     output_preds: torch.Tensor  
     hiddens: torch.Tensor  
-    lstm_state: Optional[torch.nn.Module]  # For LSTM state
+    lstm_state: Optional[torch.nn.Module] 
 
-    def accumulate(self, other):
-        """Accumulates fields from another MessagePassingScanState object."""
-        
-        # Accumulate `hint_preds` (assuming both are dicts)
-        if other.hint_preds:
-            if self.hint_preds is None:
-                # Initialize the dictionary if it's None
-                self.hint_preds = {key: value.unsqueeze(0) for key, value in other.hint_preds.items()}
-            else:
-                # Loop through each key in the dictionary and concatenate the values
-                for key, value in other.hint_preds.items():
-                    if key in self.hint_preds:
-                        self.hint_preds[key] = torch.cat([self.hint_preds[key], value.unsqueeze(0)], dim=0)
-                    else:
-                        self.hint_preds[key] = value.unsqueeze(0)
-
-        # Accumulate `output_preds` (assuming both are dicts)
-        if other.output_preds:
-            if self.output_preds is None:
-                # Initialize the dictionary if it's None
-                self.output_preds = {key: value.unsqueeze(0) for key, value in other.output_preds.items()}
-            else:
-                # Loop through each key in the dictionary and concatenate the values
-                for key, value in other.output_preds.items():
-                    if key in self.output_preds:
-                        self.output_preds[key] = torch.cat([self.output_preds[key], value.unsqueeze(0)], dim=0)
-                    else:
-                        self.output_preds[key] = value.unsqueeze(0)
-
-@dataclass
-class _MessagePassingStateChunked:
-    inputs: torch.Tensor 
-    hints: torch.Tensor 
-    is_first: torch.Tensor 
-    hint_preds: torch.Tensor 
-    hiddens: torch.Tensor  
-    lstm_state: Optional[torch.nn.Module]  # For LSTM state
-
-
-class Net(nn.Module):
+class Net(torch.nn.Module):
   """Building blocks (networks) used to encode and decode messages."""
 
   def __init__(
@@ -112,7 +66,6 @@ class Net(nn.Module):
       name: str = 'net',
   ):
     """Constructs a `Net`."""
-    # super().__init__(name=name)
     super(Net, self).__init__()
 
     self._dropout_prob = dropout_prob
@@ -127,8 +80,28 @@ class Net(nn.Module):
     self.use_lstm = use_lstm
     self.encoder_init = encoder_init
     self.nb_msg_passing_steps = nb_msg_passing_steps
-    self.layers = list() #nn.ModuleList()  # Register a list of layers
+    self.encoders, self.decoders = self._construct_encoders_decoders()
+    self.processor = self.processor_factory(self.hidden_dim)
 
+    if self.use_lstm:
+        # Define the LSTM layer
+        self.lstm = nn.LSTM(
+            input_size=self.hidden_dim,
+            hidden_size=self.hidden_dim,
+            batch_first=True
+        )
+
+        self.lstm_init = self.initialize_lstm_state
+    else:
+        self.lstm = None
+        self.lstm_init = lambda x: 0
+
+  def initialize_lstm_state(self, batch_size):
+    # Create initial hidden and cell states
+    h_0 = torch.zeros(1, batch_size, self.hidden_dim)
+    c_0 = torch.zeros(1, batch_size, self.hidden_dim)
+    return h_0, c_0
+  
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
                         i: int,
@@ -153,7 +126,7 @@ class Net(nn.Module):
                                           mp_state.hint_preds,
                                           sinkhorn_temperature=0.1,
                                           sinkhorn_steps=25,
-                                          hard=hard_postprocess)
+                                          hard=hard_postprocess)                                  
     if repred and self.decode_hints and not first_step:
       cur_hint = []
       for hint in decoded_hint:
@@ -171,7 +144,7 @@ class Net(nn.Module):
       else:
         force_mask = None
       for hint in hints:
-        hint_data = torch.tensor(hint.data)[i]
+        hint_data = torch.tensor(hint.data, dtype=torch.long)[i]
         _, loc, typ = spec[hint.name]
         if needs_noise:
           if (typ == _Type.POINTER and
@@ -180,7 +153,7 @@ class Net(nn.Module):
             # as indices (as would happen in hard postprocessing), so we need
             # to raise the ground-truth hint (potentially used for teacher
             # forcing) to its one-hot version.
-            hint_data = hint_data.long() 
+            # hint_data = hint_data.long() 
             hint_data = torch.nn.functional.one_hot(hint_data, nb_nodes)
             typ = _Type.SOFT_POINTER
           hint_data = torch.where(_expand_to(force_mask.bool(), hint_data),
@@ -216,8 +189,6 @@ class Net(nn.Module):
         output_preds=output_preds if return_all_outputs else None,
         hiddens=None, lstm_state=None)
 
-    # Complying to jax.scan, the first returned value is the state we carry over
-    # the second value is the output that will be stacked over steps.
     return new_mp_state, accum_mp_state
 
   def forward(self, features_list: List[_Features], repred: bool,
@@ -258,30 +229,6 @@ class Net(nn.Module):
       algorithm_indices = [algorithm_index]
     assert len(algorithm_indices) == len(features_list)
 
-    self.encoders, self.decoders = self._construct_encoders_decoders()
-    self.processor = self.processor_factory(self.hidden_dim)
-
-    # Optional LSTM construction in PyTorch
-    if self.use_lstm:
-        self.lstm = nn.LSTM(
-            input_size=self.hidden_dim,  # Specify input size for LSTM
-            hidden_size=self.hidden_dim,  # Hidden size for LSTM
-            batch_first=True,             # Optional: Set batch first if batch is the leading dimension
-            num_layers=1,                 # Number of LSTM layers (default is 1)
-            bidirectional=False           # Set False to match Haiku's unidirectional LSTM
-        )
-        
-        # Define a function to initialize the LSTM state (hidden and cell states)
-        def lstm_init(batch_size, device):
-            # Create initial hidden state and cell state as zeros
-            h0 = torch.zeros(1, batch_size, self.hidden_dim, device=device)  # Hidden state
-            c0 = torch.zeros(1, batch_size, self.hidden_dim, device=device)  # Cell state
-            return (h0, c0)
-    else:
-        self.lstm = None
-        # Return a default value for the LSTM state
-        lstm_init = lambda batch_size, device: (0, 0)
-
     for algorithm_index, features in zip(algorithm_indices, features_list):
       inputs = features.inputs
       hints = features.hints
@@ -293,8 +240,7 @@ class Net(nn.Module):
       hiddens = torch.zeros((batch_size, nb_nodes, self.hidden_dim))
 
       if self.use_lstm:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        lstm_state = lstm_init(batch_size * nb_nodes, device)
+        lstm_state = self.lstm_init(batch_size * nb_nodes)
         lstm_state = jax.tree_util.tree_map(
             lambda x, b=batch_size, n=nb_nodes: x.reshape(b, n, -1),
             lstm_state)
@@ -305,8 +251,6 @@ class Net(nn.Module):
           hint_preds=None, output_preds=None,
           hiddens=hiddens, lstm_state=lstm_state)
 
-      # Do the first step outside of the scan because it has a different
-      # computation graph.
       common_args = dict(
           hints=hints,
           repred=repred,
@@ -326,61 +270,41 @@ class Net(nn.Module):
           first_step=True,
           **common_args)
     
-      scan_fn = functools.partial(
-          self._msg_passing_step,
-          first_step=False,
-          **common_args)
+      
+      hint_preds_accum = {}
+      output_preds_accum = {}
+      if return_hints:
+          for key, value in lean_mp_state.hint_preds.items():
+              hint_preds_accum[key] = torch.zeros((nb_mp_steps, *value.shape), device=value.device)
+              hint_preds_accum[key][0] = value
 
+      if return_all_outputs:
+          for key, value in lean_mp_state.output_preds.items():
+              output_preds_accum[key] = torch.zeros((nb_mp_steps, *value.shape), device=value.device)
+              output_preds_accum[key][0] = value
 
-      # Initialize the output states with the initial state
-      output_mp_state = mp_state  # Initialize with the starting mp_state
-      accum_mp_state = _MessagePassingScanState(
-          hint_preds={key: value.unsqueeze(0) for key, value in lean_mp_state.hint_preds.items()} if lean_mp_state.hint_preds is not None else None,
-          output_preds={key: value.unsqueeze(0) for key, value in lean_mp_state.output_preds.items()} if lean_mp_state.output_preds is not None else None,
-          hiddens=lean_mp_state.hiddens,  # Copy hiddens without modification
-          lstm_state=lean_mp_state.lstm_state  # Copy LSTM state without modification
-      )
-
-      # Loop through the range of steps
       for step in range(1, nb_mp_steps):
-          output_mp_state, current_accum = scan_fn(output_mp_state, step)
-          accum_mp_state.accumulate(current_accum)
+          mp_state, accum_mp_state = self._msg_passing_step(mp_state, step, first_step=False, **common_args)
+          if return_hints:
+              for key, value in accum_mp_state.hint_preds.items():
+                  hint_preds_accum[key][step] = value
 
+          if return_all_outputs:
+              for key, value in accum_mp_state.output_preds.items():
+                  output_preds_accum[key][step] = value
 
-    # We only return the last algorithm's output. That's because
-    # the output only matters when a single algorithm is processed; the case
-    # `algorithm_index==-1` (meaning all algorithms should be processed)
-    # is used only to init parameters.
-    def accumulate_fn(init, tail):
-        return torch.cat([init.unsqueeze(0), tail], dim=0)
-
-
-    def tree_map_message_passing_state(fn, mp_state1, mp_state2):
-        """Applies a function to the corresponding fields in two MessagePassingScanState objects."""
-        return _MessagePassingScanState(
-            hint_preds=fn(mp_state1.hint_preds, mp_state2.hint_preds),
-            output_preds=fn(mp_state1.output_preds, mp_state2.output_preds),
-            hiddens=fn(mp_state1.hiddens, mp_state2.hiddens),
-            lstm_state=fn(mp_state1.lstm_state, mp_state2.lstm_state)
-        )
-
-    # Now apply it to lean_mp_state and current_accum
-    # accum_mp_state = tree_map_message_passing_state(accumulate_fn, lean_mp_state, accum_mp_state)
-
-    print("ACCUM hint preds", nb_mp_steps)
-    if(accum_mp_state.hint_preds):
-      print(type(accum_mp_state.hint_preds), len(accum_mp_state.hint_preds), accum_mp_state.hint_preds.keys(), accum_mp_state.hint_preds['d'].shape)
     def invert(d):
       """Dict of lists -> list of dicts."""
       if d: 
         return [dict(zip(d, i)) for i in zip(*d.values())]
 
+    # Final output predictions
     if return_all_outputs:
-      output_preds = {k: torch.stack(v)
-                      for k, v in accum_mp_state.output_preds.items()}
+        output_preds = {k: v for k, v in output_preds_accum.items()}
     else:
-      output_preds = output_mp_state.output_preds
-    hint_preds = invert(accum_mp_state.hint_preds)
+        output_preds = mp_state.output_preds
+
+    hint_preds = invert(hint_preds_accum) if return_hints else None
 
     return output_preds, hint_preds
 
@@ -389,34 +313,37 @@ class Net(nn.Module):
     encoders_ = nn.ModuleList()
     decoders_ = nn.ModuleList()
     enc_algo_idx = None
+
     for (algo_idx, spec) in enumerate(self.spec):
-      enc = nn.ModuleDict()
-      dec = nn.ModuleDict()
-      for name, (stage, loc, t) in spec.items():
-        if stage == _Stage.INPUT or (
-            stage == _Stage.HINT and self.encode_hints):
-          # Build input encoders.
-          if name == specs.ALGO_IDX_INPUT_NAME:
-            if enc_algo_idx is None:
-                enc_algo_idx = [nn.Linear(self.hidden_dim, self.hidden_dim)]
-            enc[name] = enc_algo_idx
-          else:
-            enc[name] = encoders.construct_encoders(
-                stage, loc, t, hidden_dim=self.hidden_dim,
-                init=self.encoder_init,
-                name=f'algo_{algo_idx}_{name}')
+        enc = nn.ModuleDict()
+        dec = nn.ModuleDict()
 
-        if stage == _Stage.OUTPUT or (
-            stage == _Stage.HINT and self.decode_hints):
-          # Build output decoders.
-          dec[name] = decoders.construct_decoders(
-              loc, t, hidden_dim=self.hidden_dim,
-              nb_dims=self.nb_dims[algo_idx][name],
-              name=f'algo_{algo_idx}_{name}')
-      encoders_.append(enc)
-      decoders_.append(dec)
+        for name, (stage, loc, t) in spec.items():
+            if stage == _Stage.INPUT or (
+                stage == _Stage.HINT and self.encode_hints):
+                if name == specs.ALGO_IDX_INPUT_NAME:
+                    if enc_algo_idx is None:
+                        enc_algo_idx = nn.ModuleList([nn.LazyLinear(self.hidden_dim)])
+                    enc[name] = enc_algo_idx
+                else:
+                    enc[name] = encoders.construct_encoders(
+                        stage, loc, t, hidden_dim=self.hidden_dim,
+                        init=self.encoder_init,
+                        name=f'algo_{algo_idx}_{name}')
 
-    return encoders_, decoders_
+            if stage == _Stage.OUTPUT or (
+                stage == _Stage.HINT and self.decode_hints):
+                dec[name] = decoders.construct_decoders(
+                    loc, t, hidden_dim=self.hidden_dim,
+                    nb_dims=self.nb_dims[algo_idx][name],
+                    name=f'algo_{algo_idx}_{name}')
+
+        encoders_.append(enc)
+        decoders_.append(dec)
+
+    # Return as properly tracked nn.ModuleList
+    return nn.ModuleList(encoders_), nn.ModuleList(decoders_)
+
 
   def _one_step_pred(
       self,
@@ -432,8 +359,6 @@ class Net(nn.Module):
       repred: bool,
   ):
     """Generates one-step predictions."""
-
-    # Initialise empty node/edge/graph features and adjacency matrix.
     # Initialize node features, edge features, graph features, and adjacency matrix in PyTorch
     node_fts = torch.zeros((batch_size, nb_nodes, self.hidden_dim))
     edge_fts = torch.zeros((batch_size, nb_nodes, nb_nodes, self.hidden_dim))
@@ -506,20 +431,11 @@ class Net(nn.Module):
 
     return nxt_hidden, output_preds, hint_preds, nxt_lstm_state
 
-
 def _data_dimensions(features: _Features) -> Tuple[int, int]:
   """Returns (batch_size, nb_nodes)."""
   for inp in features.inputs:
     if inp.location in [_Location.NODE, _Location.EDGE]:
       return inp.data.shape[:2]
-  assert False
-
-
-def _data_dimensions_chunked(features: _FeaturesChunked) -> Tuple[int, int]:
-  """Returns (batch_size, nb_nodes)."""
-  for inp in features.inputs:
-    if inp.location in [_Location.NODE, _Location.EDGE]:
-      return inp.data.shape[1:3]
   assert False
 
 
@@ -530,7 +446,13 @@ def _expand_to(x: _Array, y: _Array) -> _Array:
 
 
 def _is_not_done_broadcast(lengths, i, tensor):
-  is_not_done = (lengths > i + 1) * 1.0
-  while len(is_not_done.shape) < len(tensor.shape):  # pytype: disable=attribute-error  # numpy-scalars
-    is_not_done = torch.unsqueeze(torch.Tensor(is_not_done), -1)
-  return is_not_done
+    if not isinstance(lengths, torch.Tensor):
+        lengths = torch.tensor(lengths)
+    # Create a mask where lengths > i + 1
+    is_not_done = (lengths > i + 1).float()
+    
+    # Expand dimensions until `is_not_done` matches the rank of `tensor`
+    while is_not_done.dim() < tensor.dim():
+        is_not_done = is_not_done.unsqueeze(-1)
+    
+    return is_not_done
