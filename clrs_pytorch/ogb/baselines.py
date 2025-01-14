@@ -102,12 +102,13 @@ class BaselineModel(nn.Module):
 
         node_fts = self.atom_encoder(x).to(device)  # x is input atom feature
         edge_fts = self.bond_encoder(edge_attr).to(device)  # edge_attr is input edge feature
-        
-        adj_mat = to_dense_adj(edge_index, batch=batch_idx).to(device)  # Shape: [num_graphs, num_nodes, num_nodes]
+        node_fts_dense, mask = to_dense_batch(node_fts, batch=batch_idx)
 
         num_graphs = batch_idx.max().item() + 1
-        max_nodes = adj_mat.size(1)
+        max_nodes = node_fts_dense.size(1)
         edge_feature_dim = edge_fts.size(-1)
+
+        adj_mat = torch.ones((num_graphs, max_nodes, max_nodes), device=device)
 
         edge_fts_dense = torch.zeros((num_graphs, max_nodes, max_nodes, edge_feature_dim), device=device)
 
@@ -120,7 +121,6 @@ class BaselineModel(nn.Module):
             
             edge_fts_dense[i, local_edge_index[0], local_edge_index[1]] = local_edge_fts
 
-        node_fts_dense, mask = to_dense_batch(node_fts, batch=batch_idx)
 
         graph_fts = torch.zeros((num_graphs, edge_feature_dim), device=device)
 
