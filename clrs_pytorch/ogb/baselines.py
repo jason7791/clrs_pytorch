@@ -6,15 +6,13 @@ import torch.nn.functional as F
 from torch_geometric.utils import to_dense_adj, to_dense_batch
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 
-from clrs_pytorch.ogb.processors import MPNN, PGN  # PGN assumed to be in 'pgn_processor.py'
-from baselines import BaselineModel
+from clrs_pytorch.ogb.processors import MPNN
 
 
 # Function to compute weight norms
 def print_weight_norms(model, prefix=""):
     for name, param in model.named_parameters():
-        if param.requires_grad:
-            print(f"{prefix}{name}: {torch.norm(param).item()}")
+        print(f"{prefix}{name}: {torch.norm(param).item()}")
 
 
 def rename_keys(state_dict, old_prefix, new_prefix=""):
@@ -41,50 +39,47 @@ def restore_model(model, pretrained_weights_path):
     if not os.path.exists(pretrained_weights_path):
         raise FileNotFoundError(f"Checkpoint file not found: {pretrained_weights_path}")
 
-    checkpoint = torch.load(pretrained_weights_path)
+    checkpoint = torch.load(pretrained_weights_path, weights_only=True)
     updated_state_dict = rename_keys(checkpoint['model_state_dict'], old_prefix="net_fn.processor")
-
     model.load_state_dict(updated_state_dict, strict=False)
     
 
 class BaselineModel(nn.Module):
-    def __init__(self, out_dim, hidden_dim, num_layers, reduction, use_pretrain_weights, pretrained_weights_path, processor):
+    def __init__(self, out_dim, hidden_dim, num_layers, reduction, use_pretrain_weights, pretrained_weights_path):
         super(BaselineModel, self).__init__()
         self.num_layers = num_layers
 
         # Initialize PGN layers
         self.pgn_layers = nn.ModuleList()
-        for _ in range(num_layers):
-            if processor == "PGN":
-                processor_model = PGN(
-                    out_size=hidden_dim,
-                    mid_size=hidden_dim,
-                    reduction=reduction,
-                    activation=F.relu,
-                    msgs_mlp_sizes=[hidden_dim, hidden_dim]
-                )
-            else:
-                processor_model = MPNN(
-                    out_size=hidden_dim,
-                    mid_size=hidden_dim,
-                    reduction=reduction,
-                    activation=F.relu,
-                    msgs_mlp_sizes=[hidden_dim, hidden_dim]
-                )
+        for i in range(num_layers):
+            processor_model = MPNN(
+                out_size=hidden_dim,
+                mid_size=hidden_dim,
+                reduction=reduction,
+                activation=F.relu,
+                msgs_mlp_sizes=[hidden_dim, hidden_dim]
+            )
                 
             if use_pretrain_weights:
-                # Print norms before loading
-                print("BEFORE LOADING:")
-                print_weight_norms(processor_model)
+                if(i%2==1): #even layers
+                    print("Freezing pretrained weights for even layer")
 
-                # Restore the model
-                restore_model(processor_model, pretrained_weights_path)
+                    # Print norms before loading
+                    print("BEFORE LOADING:")
+                    print_weight_norms(processor_model)
 
-                # Print norms after loading
-                print("AFTER LOADING:")
-                print_weight_norms(processor_model)
+                    # Restore the model
+                    restore_model(processor_model, pretrained_weights_path)
+                    for param in processor_model.parameters():
+                        param.requires_grad = False
+
+                    # Print norms after loading
+                    print("AFTER LOADING:")
+                    print_weight_norms(processor_model)
+                else:
+                    print("Random initialisation for odd layer")
             else:
-                print("no pretrain weights")
+                print("No pretrain weights")
 
             self.pgn_layers.append(
                 processor_model
@@ -140,7 +135,6 @@ class BaselineModel(nn.Module):
                 hidden=hidden.to(device)
             )
             hidden = node_fts  # Update hidden states
-            break
 
         graph_emb = node_fts.mean(dim=1)  # Shape: (num_graphs, hidden_dim)
 

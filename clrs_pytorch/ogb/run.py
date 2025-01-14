@@ -2,7 +2,9 @@ import os
 import json
 import argparse
 from tqdm import tqdm
+from absl import logging
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -39,12 +41,17 @@ def eval(model, device, loader, evaluator):
     y_pred = torch.cat(y_pred, dim=0).numpy()
     return evaluator.eval({"y_true": y_true, "y_pred": y_pred})
 
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 def main():
     # Argument parser
     parser = argparse.ArgumentParser(description="PGN on ogbg-molhiv")
     parser.add_argument("--device", type=int, default=0)
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=5)
@@ -52,7 +59,8 @@ def main():
     parser.add_argument("--use_pretrain_weights", action="store_true", help="Use pre-trained weights.")
     parser.add_argument("--performance_path", type=str, default = "/Users/jasonwjh/Documents/clrs_pytorch/ogb_performance/performance.json")
     parser.add_argument("--checkpoint_path", type=str, default = "/Users/jasonwjh/Documents/clrs_pytorch/ogb_checkpoints/checkpoint.pth")
-    parser.add_argument("--processor", type=str, default = "MPNN")
+    parser.add_argument("--early_stop_patience", type=int, default=10, help="Number of epochs to wait for validation performance to improve before stopping.")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
     args = parser.parse_args()
 
     # Setup
@@ -60,6 +68,7 @@ def main():
     dataset = PygGraphPropPredDataset(name="ogbg-molhiv")
     split_idx = dataset.get_idx_split()
     evaluator = Evaluator(name="ogbg-molhiv")
+    set_seed(args.seed)
 
     train_loader = DataLoader(dataset[split_idx["train"]], batch_size=args.batch_size, shuffle=True)
     valid_loader = DataLoader(dataset[split_idx["valid"]], batch_size=args.batch_size, shuffle=False)
@@ -73,17 +82,21 @@ def main():
         reduction=torch.max,
         use_pretrain_weights=args.use_pretrain_weights, 
         pretrained_weights_path=args.pretrained_weights_path,
-        processor=args.processor
     ).to(device)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.BCEWithLogitsLoss()
 
     best_valid_perf = float("-inf")
+    early_stop_counter = 0
 
     # Lists to store accuracies for plotting
     train_acc_list = []
     valid_acc_list = []
     test_acc_list = []
+
+    print("checking initialisation of weights:")
+    for name, param in model.named_parameters():
+        print(f"{name} requires_grad: {param.requires_grad}")
 
     # Training loop
     for epoch in range(1, args.epochs + 1):
@@ -91,29 +104,45 @@ def main():
         train(model, device, train_loader, optimizer, criterion)
         train_perf = eval(model, device, train_loader, evaluator)
         valid_perf = eval(model, device, valid_loader, evaluator)
-        test_perf = eval(model, device, test_loader, evaluator)
-        print(f"Train: {train_perf}, Valid: {valid_perf}, Test: {test_perf}")
+        print(f"Train: {train_perf}, Valid: {valid_perf}")
 
         # Append accuracies to lists
         train_acc_list.append(train_perf["rocauc"])
         valid_acc_list.append(valid_perf["rocauc"])
-        test_acc_list.append(test_perf["rocauc"])
 
         # Save the model if the validation performance improves
         if valid_perf["rocauc"] > best_valid_perf:
             best_valid_perf = valid_perf["rocauc"]
             torch.save(model.state_dict(), args.checkpoint_path)
             print(f"New best model saved at epoch {epoch} with valid ROC-AUC: {best_valid_perf:.4f}")
+            early_stop_counter = 0  # Reset early stopping counter
+        else:
+            early_stop_counter += 1
 
+        # Check if early stopping criteria is met
+        if early_stop_counter >= args.early_stop_patience:
+            print(f"Early stopping triggered at epoch {epoch}.")
+            break
+
+            
+
+    logging.info('Restoring best model from checkpoint...')
+    checkpoint = torch.load(args.checkpoint_path, weights_only=True)
+    model.load_state_dict(checkpoint)
+    test_perf = eval(model, device, test_loader, evaluator)
+    print(f"Test: {test_perf}")
+    test_acc_list.append(test_perf["rocauc"])
 
     results = {
         "train_accuracies": train_acc_list,
         "valid_accuracies": valid_acc_list,
         "test_accuracies": test_acc_list
     }
+    # Ensure the directory for the performance path exists
+    performance_dir = os.path.dirname(args.performance_path)
+    os.makedirs(performance_dir, exist_ok=True)
     with open(args.performance_path, 'w') as f:
         json.dump(results, f)
-    
     print(f"Accuracies saved to {args.performance_path}")
 
 if __name__ == "__main__":

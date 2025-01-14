@@ -459,18 +459,13 @@ def predict( model, feedback: _Feedback,spec,
                               )
   return outs, hint_preds
 
-def restore_model(model, checkpoint_path, only_load_processor: bool = False):
+def restore_model(model, checkpoint_path):
     """Restore model from `file_name`."""
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
 
-    checkpoint = torch.load(checkpoint_path)
-    
-    if only_load_processor:
-        processor_state = {k: v for k, v in checkpoint['model_state_dict'].items() if 'processor' in k}
-        model.load_state_dict(processor_state, strict=False)
-    else:
-        model.load_state_dict(checkpoint['model_state_dict'])
+    checkpoint = torch.load(checkpoint_path, weights_only=True)
+    model.load_state_dict(checkpoint['model_state_dict'])
 
 def save_model(model, output_path):    
     checkpoint = {
@@ -599,6 +594,7 @@ def main(unused_argv):
     step += 1
 
   logging.info('Restoring best model from checkpoint...')
+  restore_model(train_model, FLAGS.checkpoint_path)
 
   for algo_idx in range(len(train_samplers)):
     common_extras = {'examples_seen': current_train_items[algo_idx],
