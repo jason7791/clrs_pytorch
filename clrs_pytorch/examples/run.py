@@ -256,13 +256,14 @@ def _concat(dps, axis):
   return jax.tree_util.tree_map(lambda *x: np.concatenate(x, axis), *dps)
 
 
-def collect_and_eval(sampler, predict_fn, sample_count, extras):
+def collect_and_eval(sampler, predict_fn, sample_count, extras, device):
   """Collect batches of output and hint preds and evaluate them."""
   processed_samples = 0
   preds = []
   outputs = []
   while processed_samples < sample_count:
     feedback = next(sampler)
+    feedback = move_feedback_to_device(feedback, device)
     batch_size = feedback.outputs[0].data.shape[0]
     outputs.append(feedback.outputs)
     cur_preds, _ = predict_fn(feedback = feedback)
@@ -409,8 +410,35 @@ def get_nb_nodes(feedback: _Feedback, is_chunked) -> int:
         return inp.data.shape[1]  # inputs are batch x nodes x ...
   assert False
 
-def train(model,optimizer,feedback, algo_idx ):
+def move_feedback_to_device(feedback, device):
+    """
+    Moves all tensor-like data in `feedback` to the specified device.
+
+    Args:
+        feedback: The feedback object containing `features` and `outputs`.
+        device: The target device (e.g., "cuda" or "cpu").
+
+    Returns:
+        feedback: The feedback object with all tensors moved to the device.
+    """
+    def move_to_device(data):
+        if isinstance(data, np.ndarray):  # Convert numpy array to torch tensor
+            return torch.tensor(data, device=device)
+        elif isinstance(data, torch.Tensor):  # Move torch tensor to the device
+            return data.to(device)
+        return data
+
+    # Move `features.inputs`, `features.hints`, and `outputs` to the device
+    for dp_list in [feedback.features.inputs, feedback.features.hints, feedback.outputs]:
+        for dp in dp_list:
+            dp.data = move_to_device(dp.data)
+
+    return feedback
+
+
+def train(model,optimizer,feedback, algo_idx , device):
     model.train()
+    feedback = move_feedback_to_device(feedback, device)
     output_preds, hint_preds = model(feedback, algo_idx)
     optimizer.zero_grad()
     lss = loss(feedback, output_preds, hint_preds)
@@ -497,6 +525,8 @@ def main(unused_argv):
   rng = np.random.RandomState(FLAGS.seed)
   set_seed(FLAGS.seed)
 
+  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
   # Create samplers
   (
       train_samplers,
@@ -537,12 +567,11 @@ def main(unused_argv):
       nb_msg_passing_steps=FLAGS.nb_msg_passing_steps,
       )
 
-  eval_model = clrs_pytorch.models.BaselineModel(
+  model = clrs_pytorch.models.BaselineModel(
       spec=spec_list,
       dummy_trajectory=[next(t) for t in val_samplers],
       **model_params
-  )
-  train_model = eval_model
+  ).to(device)
 
   best_score = -1.0
   current_train_items = [0] * len(FLAGS.algorithms)
@@ -554,13 +583,13 @@ def main(unused_argv):
   val_accuracies = {algo: [] for algo in FLAGS.algorithms}
   test_accuracies = {algo: [] for algo in FLAGS.algorithms}
 
-  optimizer =  optim.Adam(train_model.parameters(),lr= FLAGS.learning_rate)
+  optimizer =  optim.Adam(model.parameters(),lr= FLAGS.learning_rate)
   while step < FLAGS.train_steps:
     feedback_list = [next(t) for t in train_samplers]
 
     # Training step.
     for algo_idx, feedback in enumerate(feedback_list):
-      cur_loss = train(train_model, optimizer, feedback, algo_idx)
+      cur_loss = train(model, optimizer, feedback, algo_idx, device)
       current_train_items[algo_idx] += len(feedback.features.lengths)
       logging.info('Algo %s step %i current loss %f, current_train_items %i.',
                    FLAGS.algorithms[algo_idx], step,
@@ -568,17 +597,16 @@ def main(unused_argv):
 
     # Periodically evaluate model
     if step >= next_eval:
-      eval_model.load_state_dict(train_model.state_dict())
-
       for algo_idx in range(len(train_samplers)):
         common_extras = {'examples_seen': current_train_items[algo_idx],
                          'step': step,
                          'algorithm': FLAGS.algorithms[algo_idx]}
         val_stats = collect_and_eval(
             val_samplers[algo_idx],
-            functools.partial(predict, model= eval_model, algorithm_index=algo_idx, spec=spec_list),
+            functools.partial(predict, model= model, algorithm_index=algo_idx, spec=spec_list),
             val_sample_counts[algo_idx],
-            extras=common_extras)
+            extras=common_extras,
+            device=device)
         logging.info('(val) algo %s step %d: %s',
                      FLAGS.algorithms[algo_idx], step, val_stats)
         val_scores[algo_idx] = val_stats['score']
@@ -594,14 +622,14 @@ def main(unused_argv):
       if (sum(val_scores) > best_score) or step == 0:
         best_score = sum(val_scores)
         logging.info('Checkpointing best model, %s', msg)
-        save_model(train_model, FLAGS.checkpoint_path)
+        save_model(model, FLAGS.checkpoint_path)
       else:
         logging.info('Not saving new best model, %s', msg)
 
     step += 1
 
   logging.info('Restoring best model from checkpoint...')
-  restore_model(train_model, FLAGS.checkpoint_path)
+  restore_model(model, FLAGS.checkpoint_path)
 
   for algo_idx in range(len(train_samplers)):
     common_extras = {'examples_seen': current_train_items[algo_idx],
@@ -609,9 +637,10 @@ def main(unused_argv):
                      'algorithm': FLAGS.algorithms[algo_idx]}
     test_stats = collect_and_eval(
         test_samplers[algo_idx],
-        functools.partial(predict, model= eval_model, algorithm_index=algo_idx, spec=spec_list),
+        functools.partial(predict, model= model, algorithm_index=algo_idx, spec=spec_list),
         test_sample_counts[algo_idx],
-        extras=common_extras)
+        extras=common_extras,
+        device=device)
     logging.info('(test) algo %s : %s', FLAGS.algorithms[algo_idx], test_stats)
     test_accuracies[FLAGS.algorithms[algo_idx]].append(test_stats['score'])
 
