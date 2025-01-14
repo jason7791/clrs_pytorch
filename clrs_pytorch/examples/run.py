@@ -473,6 +473,12 @@ def save_model(model, output_path):
     }
     torch.save(checkpoint, output_path)
 
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
 def main(unused_argv):
   if FLAGS.hint_mode == 'encoded_decoded':
     encode_hints = True
@@ -489,6 +495,7 @@ def main(unused_argv):
   train_lengths = [int(x) for x in FLAGS.train_lengths]
 
   rng = np.random.RandomState(FLAGS.seed)
+  set_seed(FLAGS.seed)
 
   # Create samplers
   (
