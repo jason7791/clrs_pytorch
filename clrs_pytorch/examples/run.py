@@ -34,7 +34,7 @@ from clrs_pytorch._src import specs, losses, samplers, decoders
 _Feedback = samplers.Feedback
 _Location = specs.Location
 
-flags.DEFINE_list('algorithms', ['bellman_ford'], 'Which algorithms to run.')
+flags.DEFINE_list('algorithms', ['bellman_ford', 'dijkstra', 'dag_shortest_paths'], 'Which algorithms to run.')
 flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
                   'Which training sizes to use. A size of -1 means '
                   'use the benchmark dataset.')
@@ -59,8 +59,8 @@ flags.DEFINE_boolean('chunked_training', False,
 flags.DEFINE_integer('chunk_length', 16,
                      'Time chunk length used for training (if '
                      '`chunked_training` is True.')
-flags.DEFINE_integer('train_steps', 5, 'Number of training iterations.')
-flags.DEFINE_integer('eval_every', 5, 'Evaluation frequency (in steps).')
+flags.DEFINE_integer('train_steps', 20, 'Number of training iterations.')
+flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Evaluation frequency (in steps).')
 
 flags.DEFINE_integer('hidden_size', 128,
@@ -116,9 +116,9 @@ flags.DEFINE_enum('processor_type', 'mpnn',
                    'triplet_gpgn', 'triplet_gpgn_mask', 'triplet_gmpnn'],
                   'Processor type to use as the network P.')
 
-flags.DEFINE_string('checkpoint_path', '/Users/jasonwjh/Documents/clrs_pytorch/clrs_checkpoints/checkpoint.pth',
+flags.DEFINE_string('checkpoint_path', '/Users/jasonwjh/Documents/clrs_pytorch/clrs_checkpoints/checkpoint_shortest_paths.pth',
                     'Path in which checkpoints are saved.')
-flags.DEFINE_string('performance_path', '/Users/jasonwjh/Documents/clrs_pytorch/clrs_performance/performance.json',
+flags.DEFINE_string('performance_path', '/Users/jasonwjh/Documents/clrs_pytorch/clrs_performance/performance_shortest_paths.json',
                     'Path in which performance are saved.')
 flags.DEFINE_string('dataset_path', '/tmp/CLRS30',
                     'Path in which dataset is stored.')
@@ -219,7 +219,7 @@ def make_sampler(length: int,
     num_samples = clrs_pytorch.CLRS30[split]['num_samples'] * multiplier
     sampler, spec = clrs_pytorch.build_sampler(
         algorithm,
-        seed=42, #debug rng.randint(2**32),
+        seed=rng.randint(2**32),
         num_samples=num_samples,
         length=length,
         **sampler_kwargs,
@@ -503,7 +503,7 @@ def main(unused_argv):
       train_lengths=train_lengths,
       algorithms=FLAGS.algorithms,
       val_lengths=[np.amax(train_lengths)],
-      test_lengths=[-1],
+      test_lengths=[2*np.amax(train_lengths)],
       train_batch_size=FLAGS.batch_size,
   )
 
