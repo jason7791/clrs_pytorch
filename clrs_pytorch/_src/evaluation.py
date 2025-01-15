@@ -164,7 +164,7 @@ def _eval_one(pred, truth):
 
 def _mask_fn(pred, truth):
   """Evaluate outputs of type MASK, and account for any class imbalance."""
-  mask = (truth != specs.OutputClass.MASKED).astype(torch.float32)
+  mask = (truth != specs.OutputClass.MASKED).to(torch.float32)
 
   # Use F1 score for the masked outputs to address any imbalance
   tp = torch.sum((((pred > 0.5) * (truth > 0.5)) * 1.0) * mask)
