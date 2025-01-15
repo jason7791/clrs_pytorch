@@ -63,6 +63,7 @@ class Net(torch.nn.Module):
       hint_repred_mode='soft',
       nb_dims=None,
       nb_msg_passing_steps=1,
+      device = torch.device('cuda:0'),
       name: str = 'net',
   ):
     """Constructs a `Net`."""
@@ -82,6 +83,7 @@ class Net(torch.nn.Module):
     self.nb_msg_passing_steps = nb_msg_passing_steps
     self.encoders, self.decoders = self._construct_encoders_decoders()
     self.processor = self.processor_factory(self.hidden_dim)
+    self.device = device
 
     if self.use_lstm:
         # Define the LSTM layer
@@ -98,8 +100,8 @@ class Net(torch.nn.Module):
 
   def initialize_lstm_state(self, batch_size):
     # Create initial hidden and cell states
-    h_0 = torch.zeros(1, batch_size, self.hidden_dim)
-    c_0 = torch.zeros(1, batch_size, self.hidden_dim)
+    h_0 = torch.zeros(1, batch_size, self.hidden_dim, device=self.device)
+    c_0 = torch.zeros(1, batch_size, self.hidden_dim, device=self.device)
     return h_0, c_0
   
   def _msg_passing_step(self,
@@ -137,14 +139,14 @@ class Net(torch.nn.Module):
                      self._hint_teacher_forcing < 1.0)
       if needs_noise:
         # For noisy teacher forcing, choose which examples in the batch to force
-        prob_tensor = torch.full((batch_size,), self._hint_teacher_forcing)
+        prob_tensor = torch.full((batch_size,), self._hint_teacher_forcing, device=self.device)
 
         # Use torch.bernoulli to sample binary values (0s and 1s) based on the probability
         force_mask = torch.bernoulli(prob_tensor)
       else:
         force_mask = None
       for hint in hints:
-        hint_data = torch.tensor(hint.data, dtype=torch.long)[i]
+        hint_data = torch.tensor(hint.data, dtype=torch.long, device=self.device)[i]
         _, loc, typ = spec[hint.name]
         if needs_noise:
           if (typ == _Type.POINTER and
@@ -174,7 +176,7 @@ class Net(torch.nn.Module):
       output_preds = {}
       for outp in mp_state.output_preds:
         is_not_done = _is_not_done_broadcast(lengths, i,
-                                             output_preds_cand[outp])
+                                             output_preds_cand[outp], self.device)
         output_preds[outp] = is_not_done * output_preds_cand[outp] + (
             1.0 - is_not_done) * mp_state.output_preds[outp]
 
@@ -237,7 +239,7 @@ class Net(torch.nn.Module):
       batch_size, nb_nodes = _data_dimensions(features)
 
       nb_mp_steps = max(1, hints[0].data.shape[0] - 1)
-      hiddens = torch.zeros((batch_size, nb_nodes, self.hidden_dim))
+      hiddens = torch.zeros((batch_size, nb_nodes, self.hidden_dim), device=self.device)
 
       if self.use_lstm:
         lstm_state = self.lstm_init(batch_size * nb_nodes)
@@ -275,12 +277,12 @@ class Net(torch.nn.Module):
       output_preds_accum = {}
       if return_hints:
           for key, value in lean_mp_state.hint_preds.items():
-              hint_preds_accum[key] = torch.zeros((nb_mp_steps, *value.shape), device=value.device)
+              hint_preds_accum[key] = torch.zeros((nb_mp_steps, *value.shape), device=self.device)
               hint_preds_accum[key][0] = value
 
       if return_all_outputs:
           for key, value in lean_mp_state.output_preds.items():
-              output_preds_accum[key] = torch.zeros((nb_mp_steps, *value.shape), device=value.device)
+              output_preds_accum[key] = torch.zeros((nb_mp_steps, *value.shape), device=self.device)
               output_preds_accum[key][0] = value
 
       for step in range(1, nb_mp_steps):
@@ -360,12 +362,12 @@ class Net(torch.nn.Module):
   ):
     """Generates one-step predictions."""
     # Initialize node features, edge features, graph features, and adjacency matrix in PyTorch
-    node_fts = torch.zeros((batch_size, nb_nodes, self.hidden_dim))
-    edge_fts = torch.zeros((batch_size, nb_nodes, nb_nodes, self.hidden_dim))
-    graph_fts = torch.zeros((batch_size, self.hidden_dim))
+    node_fts = torch.zeros((batch_size, nb_nodes, self.hidden_dim), device=self.device)
+    edge_fts = torch.zeros((batch_size, nb_nodes, nb_nodes, self.hidden_dim), device=self.device)
+    graph_fts = torch.zeros((batch_size, self.hidden_dim), device=self.device)
 
     # Create adjacency matrix with identity matrices repeated along the batch dimension
-    adj_mat = torch.eye(nb_nodes).unsqueeze(0).repeat(batch_size, 1, 1)
+    adj_mat = torch.eye(nb_nodes, device=self.device).unsqueeze(0).repeat(batch_size, 1, 1)
 
     # ENCODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Encode node/edge/graph features from inputs and (optionally) hints.
@@ -445,9 +447,9 @@ def _expand_to(x: _Array, y: _Array) -> _Array:
   return x
 
 
-def _is_not_done_broadcast(lengths, i, tensor):
+def _is_not_done_broadcast(lengths, i, tensor, device):
     if not isinstance(lengths, torch.Tensor):
-        lengths = torch.tensor(lengths)
+        lengths = torch.tensor(lengths, device=device, dtype=torch.float32)
     # Create a mask where lengths > i + 1
     is_not_done = (lengths > i + 1).float()
     

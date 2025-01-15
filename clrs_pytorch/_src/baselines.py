@@ -13,6 +13,7 @@ class BaselineModel(torch.nn.Module):
       self,
       spec: Union[_Spec, List[_Spec]],
       dummy_trajectory: Union[List[_Feedback], _Feedback],
+      device,
       processor_factory: processors.ProcessorFactory,
       hidden_dim: int = 32,
       encode_hints: bool = False,
@@ -55,7 +56,7 @@ class BaselineModel(torch.nn.Module):
       processor_factory, use_lstm, encoder_init,
       dropout_prob, hint_teacher_forcing,
       hint_repred_mode,
-      self.nb_dims, nb_msg_passing_steps)
+      self.nb_dims, nb_msg_passing_steps, device)
 
 
   def forward(self, feedback, algorithm_index, repred=False, return_hints=True, return_all_outputs=False):

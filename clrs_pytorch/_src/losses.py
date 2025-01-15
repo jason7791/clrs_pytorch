@@ -76,19 +76,19 @@ def output_loss_chunked(truth: _DataPoint, pred: _Array,
   return torch.sum(torch.where(mask, loss, 0.0)) / total_mask  # pytype: disable=bad-return-type  
 
 
-def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
+def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int, device) -> float:
   """Output loss for full-sample training."""
   if isinstance(truth.data, np.ndarray):
-      truth_data = torch.tensor(truth.data,dtype=torch.float32, device=pred.device)
+      truth_data = torch.tensor(truth.data,dtype=torch.float32, device=device)
   else:
-      truth_data = truth.data.detach().to(pred.device)
+      truth_data = truth.data.detach().to(device)
 
   if truth.type_ == _Type.SCALAR:
     total_loss = torch.mean((pred - truth_data)**2)
 
   elif truth.type_ == _Type.MASK:
     loss = (
-        torch.maximum(pred, torch.tensor(0.0, device=pred.device)) - pred * truth_data +
+        torch.maximum(pred, torch.tensor(0.0, device=device)) - pred * truth_data +
         torch.log1p(torch.exp(-torch.abs(pred))))
     mask = (truth_data != _OutputClass.MASKED).float()
     total_loss = torch.sum(loss * mask) / torch.sum(mask)
@@ -114,7 +114,8 @@ def hint_loss(
     truth: _DataPoint,
     preds: List[_Array],
     lengths: _Array,
-    nb_nodes: int
+    nb_nodes: int,
+    device
 ):
   """Hint loss for full-sample training."""
   total_loss = 0.
@@ -125,9 +126,10 @@ def hint_loss(
       truth_type=truth.type_,
       pred=torch.stack(preds),
       nb_nodes=nb_nodes,
+      device=device
   )
-  mask *= _is_not_done_broadcast(lengths, torch.arange(length)[:, None], loss)
-  loss = torch.sum(loss * mask) / torch.maximum(torch.sum(mask), torch.tensor(EPS))
+  mask *= _is_not_done_broadcast(lengths, torch.arange(length, device=device)[:, None], loss, device=device)
+  loss = torch.sum(loss * mask) / torch.maximum(torch.sum(mask), torch.tensor(EPS, device=device))
 
   total_loss += loss
 
@@ -139,19 +141,20 @@ def _hint_loss(
     truth_type: str,
     pred: _Array,
     nb_nodes: int,
+    device
 ) -> Tuple[_Array, _Array]:
   """Hint loss helper."""
 
-  truth_data = torch.tensor(truth_data)
+  truth_data = torch.tensor(truth_data, device=device)
 
   mask = None
   if truth_type == _Type.SCALAR:
     loss = (pred - truth_data)**2
 
   elif truth_type == _Type.MASK:
-    loss = (torch.maximum(pred, torch.tensor(0)) - pred * truth_data +
+    loss = (torch.maximum(pred, torch.tensor(0, device=device)) - pred * truth_data +
             torch.log1p(torch.exp(-torch.abs(pred))))
-    mask = torch.tensor(truth_data != _OutputClass.MASKED).float()  # pytype: disable=attribute-error  # numpy-scalars
+    mask = torch.tensor(truth_data != _OutputClass.MASKED, device=device).float()  # pytype: disable=attribute-error  # numpy-scalars
 
   elif truth_type == _Type.MASK_ONE:
     loss = -torch.sum(truth_data * torch.nn.functional.log_softmax(pred), dim=-1,
@@ -172,12 +175,12 @@ def _hint_loss(
     loss = -torch.sum(truth_data * pred, dim=-1)
 
   if mask is None:
-    mask = torch.ones_like(loss)
+    mask = torch.ones_like(loss, device=device)
   return loss, mask
 
 
-def _is_not_done_broadcast(lengths, i, tensor):
-  is_not_done = (torch.tensor(lengths) > i + 1) * 1.0
+def _is_not_done_broadcast(lengths, i, tensor, device):
+  is_not_done = (torch.tensor(lengths, device=device, dtype=torch.float32) > i + 1) * 1.0
   while len(is_not_done.shape) < len(tensor.shape):  # pytype: disable=attribute-error  # numpy-scalars
     is_not_done = torch.unsqueeze(is_not_done, -1)
   return is_not_done

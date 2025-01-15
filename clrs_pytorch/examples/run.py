@@ -253,7 +253,7 @@ def make_multi_sampler(sizes, rng, **kwargs):
 
 
 def _concat(dps, axis):
-  return jax.tree_util.tree_map(lambda *x: np.concatenate(x, axis), *dps)
+  return jax.tree_util.tree_map(lambda *x: torch.cat(x, axis), *dps)
 
 
 def collect_and_eval(sampler, predict_fn, sample_count, extras, device):
@@ -287,6 +287,7 @@ def create_samplers(
     train_batch_size: int = 32,
     val_batch_size: int = 32,
     test_batch_size: int = 32,
+    device
 ):
   """Create samplers for training, validation and testing.
 
@@ -324,7 +325,7 @@ def create_samplers(
   algorithms = algorithms or FLAGS.algorithms
   for algo_idx, algorithm in enumerate(algorithms):
     # Make full dataset pipeline run on CPU (including prefetching).
-    with tf.device('/cpu:0'):
+    with device:
 
       if algorithm in ['naive_string_matcher', 'kmp_matcher']:
         # Fixed haystack + needle; variability will be in needle
@@ -423,7 +424,7 @@ def move_feedback_to_device(feedback, device):
     """
     def move_to_device(data):
         if isinstance(data, np.ndarray):  # Convert numpy array to torch tensor
-            return torch.tensor(data, device=device)
+            return torch.tensor(data, device=device, dtype=torch.float32)
         elif isinstance(data, torch.Tensor):  # Move torch tensor to the device
             return data.to(device)
         return data
@@ -441,12 +442,12 @@ def train(model,optimizer,feedback, algo_idx , device):
     feedback = move_feedback_to_device(feedback, device)
     output_preds, hint_preds = model(feedback, algo_idx)
     optimizer.zero_grad()
-    lss = loss(feedback, output_preds, hint_preds)
+    lss = loss(feedback, output_preds, hint_preds, device)
     lss.backward()
     optimizer.step()
     return lss
 
-def loss(feedback, output_preds, hint_preds, decode_hints = True):
+def loss(feedback, output_preds, hint_preds, device, decode_hints = True):
     """Calculates model loss f(feedback; params)."""
     nb_nodes = get_nb_nodes(feedback, is_chunked=False)
     lengths = feedback.features.lengths
@@ -458,6 +459,7 @@ def loss(feedback, output_preds, hint_preds, decode_hints = True):
           truth=truth,
           pred=output_preds[truth.name],
           nb_nodes=nb_nodes,
+          device=device
       )
       total_loss += loss  
 
@@ -469,6 +471,7 @@ def loss(feedback, output_preds, hint_preds, decode_hints = True):
             preds=[x[truth.name] for x in hint_preds],
             lengths=lengths,
             nb_nodes=nb_nodes,
+            device=device
         )
         total_loss += loss  
 
@@ -526,6 +529,8 @@ def main(unused_argv):
   set_seed(FLAGS.seed)
 
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+  device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+
 
   # Create samplers
   (
@@ -542,6 +547,7 @@ def main(unused_argv):
       val_lengths=[np.amax(train_lengths)],
       test_lengths=[2*np.amax(train_lengths)],
       train_batch_size=FLAGS.batch_size,
+      device=device
   )
 
   processor_factory = clrs_pytorch.get_processor_factory(
@@ -570,6 +576,7 @@ def main(unused_argv):
   model = clrs_pytorch.models.BaselineModel(
       spec=spec_list,
       dummy_trajectory=[next(t) for t in val_samplers],
+      device = device,
       **model_params
   ).to(device)
 

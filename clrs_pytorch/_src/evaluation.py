@@ -19,8 +19,7 @@ from typing import Dict, List, Tuple
 import chex
 from clrs_pytorch._src import probing
 from clrs_pytorch._src import specs
-import numpy as np
-
+import torch
 
 _Array = chex.Array
 Result = Dict[str, probing.DataPoint]
@@ -47,9 +46,9 @@ def fuse_perm_and_mask(perm: probing.DataPoint,
   assert mask.location == specs.Location.NODE
   assert perm.data.shape[-1] == perm.data.shape[-2]
   assert perm.data.shape[:-1] == mask.data.shape
-  data = np.where(mask.data > 0.5,
-                  np.arange(perm.data.shape[-1]),  # self-pointers
-                  np.argmax(perm.data, axis=-1))   # original pointers
+  data = torch.where(mask.data > 0.5,
+                  torch.arange(perm.data.shape[-1]),  # self-pointers
+                  torch.argmax(perm.data, axis=-1))   # original pointers
   return probing.DataPoint(name=perm.name,
                            type_=specs.Type.POINTER,
                            location=perm.location,
@@ -111,10 +110,10 @@ def evaluate_hints(
     eval_along_time = [_evaluate(truth, p[truth.name],
                                  idx=i+1, lengths=lengths)
                        for (i, p) in enumerate(hint_preds)]
-    evals[truth.name] = np.sum(
-        [x * np.sum(i+1 < lengths)
-         for i, x in enumerate(eval_along_time)]) / np.sum(lengths - 1)
-    evals[truth.name + '_along_time'] = np.array(eval_along_time)
+    evals[truth.name] = torch.sum(
+        [x * torch.sum(i+1 < lengths)
+         for i, x in enumerate(eval_along_time)]) / torch.sum(lengths - 1)
+    evals[truth.name + '_along_time'] = torch.array(eval_along_time)
 
   # Unlike outputs, the hints sometimes include scalars, which don't have
   # a meaningful eval score. So we don't compute a global 'hint score' as we
@@ -150,7 +149,7 @@ def _evaluate(truth, pred, idx=None, lengths=None):
   truth_data = truth.data
   pred_data = pred.data
   if idx is not None:
-    if np.all(idx >= lengths):
+    if torch.all(idx >= lengths):
       return 0.
     truth_data = truth_data[idx][idx < lengths]
     pred_data = pred_data[idx < lengths]
@@ -158,45 +157,45 @@ def _evaluate(truth, pred, idx=None, lengths=None):
 
 
 def _eval_one(pred, truth):
-  mask = np.all(truth != specs.OutputClass.MASKED, axis=-1)
-  return np.sum(
-      (np.argmax(pred, -1) == np.argmax(truth, -1)) * mask) / np.sum(mask)
+  mask = torch.all(truth != specs.OutputClass.MASKED, axis=-1)
+  return torch.sum(
+      (torch.argmax(pred, -1) == torch.argmax(truth, -1)) * mask) / torch.sum(mask)
 
 
 def _mask_fn(pred, truth):
   """Evaluate outputs of type MASK, and account for any class imbalance."""
-  mask = (truth != specs.OutputClass.MASKED).astype(np.float32)
+  mask = (truth != specs.OutputClass.MASKED).astype(torch.float32)
 
   # Use F1 score for the masked outputs to address any imbalance
-  tp = np.sum((((pred > 0.5) * (truth > 0.5)) * 1.0) * mask)
-  fp = np.sum((((pred > 0.5) * (truth < 0.5)) * 1.0) * mask)
-  fn = np.sum((((pred < 0.5) * (truth > 0.5)) * 1.0) * mask)
+  tp = torch.sum((((pred > 0.5) * (truth > 0.5)) * 1.0) * mask)
+  fp = torch.sum((((pred > 0.5) * (truth < 0.5)) * 1.0) * mask)
+  fn = torch.sum((((pred < 0.5) * (truth > 0.5)) * 1.0) * mask)
 
   # Protect against division by zero
   if tp + fp > 0:
     precision = tp / (tp + fp)
   else:
-    precision = np.float32(1.0)
+    precision = torch.float32(1.0)
   if tp + fn > 0:
     recall = tp / (tp + fn)
   else:
-    recall = np.float32(1.0)
+    recall = torch.float32(1.0)
 
   if precision + recall > 0.0:
     f_1 = 2.0 * precision * recall / (precision + recall)
   else:
-    f_1 = np.float32(0.0)
+    f_1 = torch.float32(0.0)
 
   return f_1
 
 _EVAL_FN = {
     specs.Type.SCALAR:
-        lambda pred, truth: np.mean((pred - truth)**2),
+        lambda pred, truth: torch.mean((pred - truth)**2),
     specs.Type.MASK: _mask_fn,
     specs.Type.MASK_ONE:
         _eval_one,
     specs.Type.CATEGORICAL:
         _eval_one,
     specs.Type.POINTER:
-        lambda pred, truth: np.mean((pred == truth) * 1.0),
+        lambda pred, truth: torch.mean((pred == truth) * 1.0),
 }
