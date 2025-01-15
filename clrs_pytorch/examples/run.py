@@ -528,8 +528,8 @@ def main(unused_argv):
   rng = np.random.RandomState(FLAGS.seed)
   set_seed(FLAGS.seed)
 
-  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
+  device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+  # device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
 
 
   # Create samplers
