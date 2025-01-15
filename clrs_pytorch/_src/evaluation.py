@@ -175,16 +175,16 @@ def _mask_fn(pred, truth):
   if tp + fp > 0:
     precision = tp / (tp + fp)
   else:
-    precision = torch.float32(1.0)
+    precision = torch.tensor(1.0, dtype=torch.float32)
   if tp + fn > 0:
     recall = tp / (tp + fn)
   else:
-    recall = torch.float32(1.0)
+    recall = torch.tensor(1.0, dtype=torch.float32)
 
   if precision + recall > 0.0:
     f_1 = 2.0 * precision * recall / (precision + recall)
   else:
-    f_1 = torch.float32(0.0)
+    f_1 = torch.tensor(1.0, dtype=torch.float32)
 
   return f_1
 

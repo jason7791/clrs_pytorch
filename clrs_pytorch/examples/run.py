@@ -34,7 +34,7 @@ from clrs_pytorch._src import specs, losses, samplers, decoders
 _Feedback = samplers.Feedback
 _Location = specs.Location
 
-flags.DEFINE_list('algorithms', ['bellman_ford', 'dijkstra', 'dag_shortest_paths'], 'Which algorithms to run.')
+flags.DEFINE_list('algorithms', ['bellman_ford', 'dijkstra', 'dag_shortest_paths', 'mst_kruskal', 'bridges', 'bfs'], 'Which algorithms to run.')
 flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
                   'Which training sizes to use. A size of -1 means '
                   'use the benchmark dataset.')
@@ -528,9 +528,9 @@ def main(unused_argv):
   rng = np.random.RandomState(FLAGS.seed)
   set_seed(FLAGS.seed)
 
-  device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-  # device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-
+  device = torch.device('cuda:0' if torch.cuda.is_available() else 
+                        'mps' if torch.backends.mps.is_available() else 
+                        'cpu')
 
   # Create samplers
   (
