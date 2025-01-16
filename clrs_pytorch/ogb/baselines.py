@@ -49,43 +49,34 @@ class BaselineModel(nn.Module):
         super(BaselineModel, self).__init__()
         self.num_layers = num_layers
 
-        # Initialize PGN layers
-        self.pgn_layers = nn.ModuleList()
+        self.layers = nn.ModuleList()
         for i in range(num_layers):
-            processor_model = MPNN(
+            mpnn_layer = MPNN(
                 out_size=hidden_dim,
                 mid_size=hidden_dim,
                 reduction=reduction,
                 activation=F.relu,
                 msgs_mlp_sizes=[hidden_dim, hidden_dim]
             )
-                
             if use_pretrain_weights:
                 if(i%2==1): #even layers
                     print("Freezing pretrained weights for even layer")
-
-                    # Print norms before loading
                     print("BEFORE LOADING:")
-                    print_weight_norms(processor_model)
-
-                    # Restore the model
-                    restore_model(processor_model, pretrained_weights_path)
-                    for param in processor_model.parameters():
+                    print_weight_norms(mpnn_layer)
+                    restore_model(mpnn_layer, pretrained_weights_path)
+                    for param in mpnn_layer.parameters():
                         param.requires_grad = False
-
-                    # Print norms after loading
                     print("AFTER LOADING:")
-                    print_weight_norms(processor_model)
+                    print_weight_norms(mpnn_layer)
                 else:
                     print("Random initialisation for odd layer")
             else:
                 print("No pretrain weights")
 
-            self.pgn_layers.append(
-                processor_model
+            self.layers.append(
+                mpnn_layer
             )
 
-        # Graph-level prediction head
         self.graph_pred = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -98,37 +89,35 @@ class BaselineModel(nn.Module):
 
     def forward(self, batch):
         x, edge_index, edge_attr, batch_idx = batch.x, batch.edge_index, batch.edge_attr, batch.batch
-        device = x.device  # Get the device from input tensors
+        device = x.device  
 
-        node_fts = self.atom_encoder(x).to(device)  # x is input atom feature
-        edge_fts = self.bond_encoder(edge_attr).to(device)  # edge_attr is input edge feature
-        node_fts_dense, mask = to_dense_batch(node_fts, batch=batch_idx)
+        node_fts = self.atom_encoder(x).to(device)  
+        edge_fts = self.bond_encoder(edge_attr).to(device)  
+        node_fts_dense, mask = to_dense_batch(node_fts, batch=batch_idx) # B x N x F
 
         num_graphs = batch_idx.max().item() + 1
         max_nodes = node_fts_dense.size(1)
         edge_feature_dim = edge_fts.size(-1)
 
-        adj_mat = torch.ones((num_graphs, max_nodes, max_nodes), device=device)
+        adj_mat = torch.ones((num_graphs, max_nodes, max_nodes), device=device) # B x N x N
 
-        edge_fts_dense = torch.zeros((num_graphs, max_nodes, max_nodes, edge_feature_dim), device=device)
+        edge_fts_dense = torch.zeros((num_graphs, max_nodes, max_nodes, edge_feature_dim), device=device) # B x N x N x F
 
         for i in range(num_graphs):
             mask = batch_idx[edge_index[0]] == i  
             local_edge_index = edge_index[:, mask]  
             local_edge_fts = edge_fts[mask] 
-
             local_edge_index = local_edge_index - local_edge_index.min()
-            
             edge_fts_dense[i, local_edge_index[0], local_edge_index[1]] = local_edge_fts
 
 
-        graph_fts = torch.zeros((num_graphs, edge_feature_dim), device=device)
+        graph_fts = torch.zeros((num_graphs, edge_feature_dim), device=device) # B x F
 
-        hidden = torch.zeros_like(node_fts_dense, device=device)
+        hidden = torch.zeros_like(node_fts_dense, device=device) # B x N x F
 
-        for pgn_layer in self.pgn_layers:
+        for pgn_layer in self.layers:
             node_fts, _ = pgn_layer(
-                node_fts=node_fts_dense.to(device),
+                node_fts=node_fts_dense.to(device), 
                 edge_fts=edge_fts_dense.to(device),
                 graph_fts=graph_fts.to(device),
                 adj_mat=adj_mat.to(device),
@@ -136,8 +125,8 @@ class BaselineModel(nn.Module):
             )
             hidden = node_fts  # Update hidden states
 
-        graph_emb = node_fts.mean(dim=1)  # Shape: (num_graphs, hidden_dim)
+        graph_emb = node_fts.mean(dim=1)  # B x F
 
-        res = self.graph_pred(graph_emb.to(device))
+        res = self.graph_pred(graph_emb.to(device)) # B x 1
 
         return res
