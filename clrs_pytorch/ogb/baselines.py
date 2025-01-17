@@ -8,7 +8,6 @@ from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 
 from processors import MPNN
 
-
 # Function to compute weight norms
 def print_weight_norms(model, prefix=""):
     for name, param in model.named_parameters():

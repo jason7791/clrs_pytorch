@@ -13,7 +13,7 @@ from torch_geometric.loader import DataLoader
 from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
 
 from baselines import BaselineModel
-
+from baselines_parallel import ParallelMPNNModel
 
 def train(model, device, loader, optimizer, criterion):
     model.train()
@@ -25,6 +25,7 @@ def train(model, device, loader, optimizer, criterion):
         loss = criterion(pred[is_labeled], batch.y[is_labeled].float())
         loss.backward()
         optimizer.step()
+
 
 
 def eval(model, device, loader, evaluator):
@@ -75,7 +76,7 @@ def main():
     test_loader = DataLoader(dataset[split_idx["test"]], batch_size=args.batch_size, shuffle=False)
 
     # Model and optimizer
-    model = BaselineModel(
+    model = ParallelMPNNModel(
         out_dim=dataset.num_tasks,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
@@ -83,7 +84,10 @@ def main():
         use_pretrain_weights=args.use_pretrain_weights, 
         pretrained_weights_path=args.pretrained_weights_path,
     ).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=0.001
+    )
     criterion = nn.BCEWithLogitsLoss()
 
     best_valid_perf = float("-inf")
@@ -94,9 +98,15 @@ def main():
     valid_acc_list = []
     test_acc_list = []
 
-    print("checking initialisation of weights:")
-    for name, param in model.named_parameters():
-        print(f"{name} requires_grad: {param.requires_grad}")
+    # Save initial weights
+    initial_weights = {}
+    for i, layer_dict in enumerate(model.layers):
+        initial_weights[f"pretrained_mpnn_layer_{i}"] = {
+            name: param.clone() for name, param in layer_dict["pretrained"].named_parameters()
+        }
+        initial_weights[f"random_mpnn_layer_{i}"] = {
+            name: param.clone() for name, param in layer_dict["random"].named_parameters()
+        }
 
     # Training loop
     for epoch in range(1, args.epochs + 1):
@@ -124,7 +134,19 @@ def main():
             print(f"Early stopping triggered at epoch {epoch}.")
             break
 
-            
+    # Compare weights after training
+    for i, layer_dict in enumerate(model.layers):
+        print(f"Checking weights for layer {i}:")
+
+        # Check pretrained MPNN weights
+        for name, param in layer_dict["pretrained"].named_parameters():
+            same = torch.equal(param, initial_weights[f"pretrained_mpnn_layer_{i}"][name])
+            print(f"  Pretrained {name}: {'Unchanged' if same else 'Changed'}")
+
+        # Check random MPNN weights
+        for name, param in layer_dict["random"].named_parameters():
+            same = torch.equal(param, initial_weights[f"random_mpnn_layer_{i}"][name])
+            print(f"  Random {name}: {'Unchanged' if same else 'Changed'}")
 
     logging.info('Restoring best model from checkpoint...')
     checkpoint = torch.load(args.checkpoint_path, weights_only=True)
