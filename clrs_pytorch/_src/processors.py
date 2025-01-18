@@ -105,13 +105,20 @@ class PGN(Processor):
         self.nb_triplet_fts = nb_triplet_fts
         self.gated = gated
 
-        self.m_1 = nn.Linear( 2* self.mid_size, self.mid_size)
-        self.m_2 = nn.Linear(2* self.mid_size,self.mid_size)
+        self.m_1 = nn.Linear(2*self.mid_size, self.mid_size)
+        self.m_2 = nn.Linear(2*self.mid_size,self.mid_size)
         self.m_e = nn.Linear(self.mid_size,self.mid_size)
         self.m_g = nn.Linear(self.mid_size, self.mid_size)
 
-        self.o1 = nn.Linear(2* self.mid_size, self.out_size)
+        self.o1 = nn.Linear(2*self.mid_size, self.out_size)
         self.o2 = nn.Linear(self.mid_size, self.out_size)
+
+        if self.gated:
+            self.gate1 = nn.Linear(2*self.mid_size, self.out_size)
+            self.gate2 = nn.Linear(self.mid_size, self.out_size)
+            self.gate3 = nn.Linear(self.out_size, self.out_size)
+            self.gate3.bias.data.fill_(-3)  # Initialize bias to -3
+
 
         if self._msgs_mlp_sizes is not None:
             mlp_layers = []
@@ -122,7 +129,40 @@ class PGN(Processor):
                 input_size = size
             self.mlp = nn.Sequential(*mlp_layers)
             
+        if self.use_triplets:
+            self.t_1 = nn.Linear(2*self.mid_size,self.nb_triplet_fts)
+            self.t_2 = nn.Linear(2*self.mid_size,self.nb_triplet_fts)
+            self.t_3 = nn.Linear(2*self.mid_size,self.nb_triplet_fts)
+            self.t_e_1 = nn.Linear(self.mid_size,self.nb_triplet_fts)
+            self.t_e_2 = nn.Linear(self.mid_size,self.nb_triplet_fts)
+            self.t_e_3 = nn.Linear(self.mid_size,self.nb_triplet_fts)
+            self.t_g = nn.Linear(self.mid_size,self.nb_triplet_fts)
+            self.o3 = nn.Linear(self.mid_size, self.out_size)
+            
         self.ln = None  # Placeholder for LayerNorm
+
+    def get_triplet_msgs(self, z, edge_fts, graph_fts, nb_triplet_fts):
+        """Triplet messages, as done by Dudzik and Velickovic (2022)."""
+
+
+        tri_1 = self.t_1(z)
+        tri_2 = self.t_2(z)
+        tri_3 = self.t_3(z)
+        tri_e_1 = self.t_e_1(edge_fts)
+        tri_e_2 = self.t_e_2(edge_fts)
+        tri_e_3 = self.t_e_3(edge_fts)
+        tri_g = self.t_g(graph_fts)
+
+        return (
+            tri_1.unsqueeze(2).unsqueeze(3)      +  # (B, N, 1, 1, H)
+            tri_2.unsqueeze(1).unsqueeze(3)      +  # + (B, 1, N, 1, H)
+            tri_3.unsqueeze(1).unsqueeze(2)      +  # + (B, 1, 1, N, H)
+            tri_e_1.unsqueeze(3)                 +  # + (B, N, N, 1, H)
+            tri_e_2.unsqueeze(2)                 +  # + (B, N, 1, N, H)
+            tri_e_3.unsqueeze(1)                 +  # + (B, 1, N, N, H)
+            tri_g.unsqueeze(1).unsqueeze(2).unsqueeze(3)  # + (B, 1, 1, 1, H)
+        )  # = (B, N, N, N, H)
+
     def forward(
         self,
         node_fts: _Array,
@@ -140,7 +180,7 @@ class PGN(Processor):
         assert adj_mat.shape == (b, n, n)
 
         # Concatenate node features and hidden features
-        z = torch.cat([node_fts, hidden], dim=-1)  # Shape: (B, N, F_z)
+        z = torch.cat([node_fts, hidden], dim=-1)  # Shape: (B, N, 2 * F_z)
 
         msg_1 = self.m_1(z)
         msg_2 = self.m_2(z)
@@ -148,6 +188,15 @@ class PGN(Processor):
         msg_g = self.m_g(graph_fts)
 
         tri_msgs = None
+
+        if self.use_triplets:
+            # Triplet messages, as done by Dudzik and Velickovic (2022)
+            triplets = self.get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
+            tri_msgs = self.o3(torch.max(triplets, dim=1))  # (B, N, N, H)
+
+            if self.activation is not None:
+                tri_msgs = self.activation(tri_msgs)
+
 
         # Message aggregation
         msgs = (
@@ -185,6 +234,10 @@ class PGN(Processor):
             self.ln = nn.LayerNorm(ret.size(-1)).to(ret.device)  # Create LayerNorm and move to the correct device
         if self.use_ln:
             ret = self.ln(ret)  # Apply LayerNorm
+
+        if self.gated:
+            gate = torch.sigmoid(self.gate3(torch.relu(self.gate1(z) + self.gate2(msgs))))
+            ret = ret * gate + hidden * (1 - gate)
 
         return ret, tri_msgs  # Updated node embeddings and triplet messages
 
