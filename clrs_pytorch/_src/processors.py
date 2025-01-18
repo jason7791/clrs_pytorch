@@ -113,6 +113,9 @@ class PGN(Processor):
         self.o1 = nn.Linear(2*self.mid_size, self.out_size)
         self.o2 = nn.Linear(self.mid_size, self.out_size)
 
+        if self.use_ln:
+            self.ln = nn.LayerNorm(self.out_size, elementwise_affine=True)
+
         if self.gated:
             self.gate1 = nn.Linear(2*self.mid_size, self.out_size)
             self.gate2 = nn.Linear(self.mid_size, self.out_size)
@@ -228,12 +231,12 @@ class PGN(Processor):
         h_1 = self.o1(z)  # Shape: (B, N, F_out)
         h_2 = self.o2(msgs)  # Shape: (B, N, F_out)
         ret = h_1 + h_2  # Shape: (B, N, F_out)
+
         if self.activation is not None:
             ret = self.activation(ret)
-        if self.use_ln and self.ln is None:
-            self.ln = nn.LayerNorm(ret.size(-1)).to(ret.device)  # Create LayerNorm and move to the correct device
+
         if self.use_ln:
-            ret = self.ln(ret)  # Apply LayerNorm
+            ret = self.ln(ret)  
 
         if self.gated:
             gate = torch.sigmoid(self.gate3(torch.relu(self.gate1(z) + self.gate2(msgs))))
