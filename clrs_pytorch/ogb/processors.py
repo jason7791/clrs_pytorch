@@ -83,7 +83,7 @@ class PGN(Processor):
         activation: Optional[Callable] = F.relu,
         reduction: Callable = torch.max,
         msgs_mlp_sizes: Optional[List[int]] = None,
-        use_ln: bool = False,
+        use_ln: bool = True,
         use_triplets: bool = False,
         nb_triplet_fts: int = 8,
         gated: bool = False,
@@ -181,10 +181,10 @@ class PGN(Processor):
         h_1 = self.o1(z)  # Shape: (B, N, F_out)
         h_2 = self.o2(msgs)  # Shape: (B, N, F_out)
         ret = h_1 + h_2  # Shape: (B, N, F_out)
+
         if self.activation is not None:
             ret = self.activation(ret)
-        if self.use_ln and self.ln is None:
-            self.ln = nn.LayerNorm(ret.size(-1)).to(ret.device)  # Create LayerNorm and move to the correct device
+            
         if self.use_ln:
             ret = self.ln(ret)  # Apply LayerNorm
 
