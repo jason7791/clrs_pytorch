@@ -31,6 +31,20 @@ _Spec = specs.Spec
 _Stage = specs.Stage
 _Type = specs.Type
 
+class CustomLazyLinear(nn.LazyLinear):
+    def __init__(self, out_features: int, initialiser=None, **kwargs):
+        super().__init__(out_features, **kwargs)
+        self.initialiser = initialiser  # Ensure attribute is consistently named
+
+    def reset_parameters(self):
+        # Ensure weights are materialized before applying initialization
+        if isinstance(self.weight, nn.UninitializedParameter):
+            return  # Skip initialization until weights are created
+
+        # Apply custom initialization if provided
+        if hasattr(self, "initialiser") and self.initialiser:
+            self.initialiser(self.weight)
+
 
 def construct_encoders(stage: str, loc: str, t: str,
                        hidden_dim: int, init: str, name: str):
@@ -44,7 +58,7 @@ def construct_encoders(stage: str, loc: str, t: str,
             # Truncate values within 2 standard deviations
             tensor.clamp_(-2 * stddev, 2 * stddev)
 
-    if init == 'xavier_on_scalars' and stage == '_Stage.HINT' and t == '_Type.SCALAR':
+    if init == 'xavier_on_scalars' and stage == _Stage.HINT and t == _Type.SCALAR:
         stddev = 1.0 / math.sqrt(hidden_dim)
         initialiser = lambda tensor: truncated_normal_(tensor, stddev)
     elif init in ['default', 'xavier_on_scalars']:
@@ -52,21 +66,12 @@ def construct_encoders(stage: str, loc: str, t: str,
     else:
         raise ValueError(f'Encoder initializer {init} not supported.')
 
-    def create_linear(out_features: int) -> nn.Linear:
-        layer = nn.Linear(1, out_features)
-        if initialiser:
-            initialiser(layer.weight) 
-        nn.init.zeros_(layer.bias)  
-        return layer
-    
-    def create_lazy_linear(out_features):
-       return nn.LazyLinear(out_features)
-    
-    encoders = nn.ModuleList([create_lazy_linear(hidden_dim)])
+
+    encoders = nn.ModuleList([CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser)])
     if loc == _Location.EDGE and t == _Type.POINTER:
         # Edge pointers need two-way encoders
-        encoders.append(create_lazy_linear(hidden_dim))
-
+        encoders.append(CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser))
+    print("encoders creation ok")
     return encoders
 
 def preprocess(dp: _DataPoint, nb_nodes: int) -> _DataPoint:

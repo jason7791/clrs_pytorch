@@ -27,6 +27,7 @@ import jax
 import tensorflow as tf
 import requests
 from absl import app, flags, logging
+from torch.nn.utils import clip_grad_norm_
 
 import clrs_pytorch
 from clrs_pytorch._src import specs, losses, samplers, decoders
@@ -34,7 +35,7 @@ from clrs_pytorch._src import specs, losses, samplers, decoders
 _Feedback = samplers.Feedback
 _Location = specs.Location
 
-flags.DEFINE_list('algorithms', ['bellman_ford', 'dijkstra', 'dag_shortest_paths', 'mst_kruskal', 'bridges', 'bfs'], 'Which algorithms to run.')
+flags.DEFINE_list('algorithms', ['bellman_ford'], 'Which algorithms to run.')
 flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
                   'Which training sizes to use. A size of -1 means '
                   'use the benchmark dataset.')
@@ -437,13 +438,15 @@ def move_feedback_to_device(feedback, device):
     return feedback
 
 
-def train(model,optimizer,feedback, algo_idx , device):
+def train(model,optimizer,feedback, algo_idx , grad_clip_max_norm, device):
     model.train()
     feedback = move_feedback_to_device(feedback, device)
     output_preds, hint_preds = model(feedback, algo_idx)
     optimizer.zero_grad()
     lss = loss(feedback, output_preds, hint_preds, device)
     lss.backward()
+    if grad_clip_max_norm != 0.0:
+        clip_grad_norm_(model.parameters(), grad_clip_max_norm)
     optimizer.step()
     return lss
 
@@ -596,7 +599,7 @@ def main(unused_argv):
 
     # Training step.
     for algo_idx, feedback in enumerate(feedback_list):
-      cur_loss = train(model, optimizer, feedback, algo_idx, device)
+      cur_loss = train(model, optimizer, feedback, algo_idx, FLAGS.grad_clip_max_norm, device)
       current_train_items[algo_idx] += len(feedback.features.lengths)
       logging.info('Algo %s step %i current loss %f, current_train_items %i.',
                    FLAGS.algorithms[algo_idx], step,
