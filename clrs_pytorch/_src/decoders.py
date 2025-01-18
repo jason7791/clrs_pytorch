@@ -22,7 +22,6 @@ import haiku as hk
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import jax
 
 _Array = torch.Tensor
 _DataPoint = probing.DataPoint
@@ -54,17 +53,17 @@ def log_sinkhorn(x: _Array, steps: int, temperature: float, zero_diagonal: bool,
   if noise_rng_key is not None:
     # Add standard Gumbel noise (see https://arxiv.org/abs/1802.08665)
     # Generate uniform noise in PyTorch
-    noise = torch.rand(x.shape, generator=noise_rng_key)  # noise_rng_key acts as a random seed
+    noise = torch.rand(x.shape, generator=noise_rng_key, device=x.device)  # noise_rng_key acts as a random seed
 
     # Apply the same log transformations as in the JAX code
     noise = -torch.log(-torch.log(noise + 1e-12) + 1e-12)
     x = x + noise
   x /= temperature
   if zero_diagonal:
-    x = x - 1e6 * torch.eye(x.shape[-1])
+    x = x - 1e6 * torch.eye(x.shape[-1], device=x.device)
   for _ in range(steps):
-    x = jax.nn.log_softmax(x, axis=-1)
-    x = jax.nn.log_softmax(x, axis=-2)
+    x = F.log_softmax(x, axis=-1)
+    x = F.log_softmax(x, axis=-2)
   return x
 
 def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int, name: str):
@@ -188,6 +187,13 @@ def postprocess(spec: _Spec, preds: Dict[str, _Array],
                 data = F.softmax(data, dim=-1)
                 new_t = _Type.SOFT_POINTER
         elif t == _Type.PERMUTATION_POINTER:
+            # Convert the matrix of logits to a doubly stochastic matrix.
+            data = log_sinkhorn(
+                x=data,
+                steps=sinkhorn_steps,
+                temperature=sinkhorn_temperature,
+                zero_diagonal=True,
+                noise_rng_key=None)
             data = torch.exp(data)
             if hard:
                 data = F.one_hot(torch.argmax(data, dim=-1), num_classes=data.shape[-1]).float()
