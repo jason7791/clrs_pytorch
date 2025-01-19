@@ -141,8 +141,7 @@ class PGN(Processor):
             self.t_e_3 = nn.Linear(self.mid_size,self.nb_triplet_fts)
             self.t_g = nn.Linear(self.mid_size,self.nb_triplet_fts)
             self.o3 = nn.Linear(self.mid_size, self.out_size)
-            
-        self.ln = None  # Placeholder for LayerNorm
+        
 
     def get_triplet_msgs(self, z, edge_fts, graph_fts, nb_triplet_fts):
         """Triplet messages, as done by Dudzik and Velickovic (2022)."""
