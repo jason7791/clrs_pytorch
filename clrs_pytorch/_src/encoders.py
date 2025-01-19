@@ -67,15 +67,10 @@ def construct_encoders(stage: str, loc: str, t: str,
         raise ValueError(f'Encoder initializer {init} not supported.')
 
 
-    # encoders = nn.ModuleList([CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser)])
-    # if loc == _Location.EDGE and t == _Type.POINTER:
-    #     # Edge pointers need two-way encoders
-    #     encoders.append(CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser))
-
-    encoders = nn.ModuleList([nn.LazyLinear(out_features=hidden_dim)])
+    encoders = nn.ModuleList([CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser)])
     if loc == _Location.EDGE and t == _Type.POINTER:
         # Edge pointers need two-way encoders
-        encoders.append(nn.LazyLinear(out_features=hidden_dim))
+        encoders.append(CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser))
     return encoders
 
 def preprocess(dp: _DataPoint, nb_nodes: int) -> _DataPoint:
