@@ -62,6 +62,7 @@ def main():
     parser.add_argument("--checkpoint_path", type=str, default = "/Users/jasonwjh/Documents/clrs_pytorch/ogb_checkpoints/checkpoint.pth")
     parser.add_argument("--early_stop_patience", type=int, default=10, help="Number of epochs to wait for validation performance to improve before stopping.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
+    parser.add_argument("--model", type=str, default="serial", help="Parallel or Serial Model")
     args = parser.parse_args()
 
     # Setup
@@ -76,14 +77,24 @@ def main():
     test_loader = DataLoader(dataset[split_idx["test"]], batch_size=args.batch_size, shuffle=False)
 
     # Model and optimizer
-    model = ParallelMPNNModel(
-        out_dim=dataset.num_tasks,
-        hidden_dim=args.hidden_dim,
-        num_layers=args.num_layers,
-        reduction=torch.max,
-        use_pretrain_weights=args.use_pretrain_weights, 
-        pretrained_weights_path=args.pretrained_weights_path,
-    ).to(device)
+    if(args.model == "serial"):
+        model = BaselineModel(
+            out_dim=dataset.num_tasks,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            reduction=torch.max,
+            use_pretrain_weights=args.use_pretrain_weights, 
+            pretrained_weights_path=args.pretrained_weights_path,
+        ).to(device)
+    else:
+        model = ParallelMPNNModel(
+            out_dim=dataset.num_tasks,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            reduction=torch.max,
+            use_pretrain_weights=args.use_pretrain_weights, 
+            pretrained_weights_path=args.pretrained_weights_path,
+        ).to(device)
     optimizer = optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=0.001
@@ -101,11 +112,8 @@ def main():
     # Save initial weights
     initial_weights = {}
     for i, layer_dict in enumerate(model.layers):
-        initial_weights[f"pretrained_mpnn_layer_{i}"] = {
-            name: param.clone() for name, param in layer_dict["pretrained"].named_parameters()
-        }
-        initial_weights[f"random_mpnn_layer_{i}"] = {
-            name: param.clone() for name, param in layer_dict["random"].named_parameters()
+        initial_weights[f"mpnn_layer_{i}"] = {
+            name: param.clone() for name, param in layer_dict.named_parameters()
         }
 
     # Training loop
@@ -138,15 +146,9 @@ def main():
     for i, layer_dict in enumerate(model.layers):
         print(f"Checking weights for layer {i}:")
 
-        # Check pretrained MPNN weights
-        for name, param in layer_dict["pretrained"].named_parameters():
-            same = torch.equal(param, initial_weights[f"pretrained_mpnn_layer_{i}"][name])
-            print(f"  Pretrained {name}: {'Unchanged' if same else 'Changed'}")
-
-        # Check random MPNN weights
-        for name, param in layer_dict["random"].named_parameters():
-            same = torch.equal(param, initial_weights[f"random_mpnn_layer_{i}"][name])
-            print(f"  Random {name}: {'Unchanged' if same else 'Changed'}")
+        for name, param in layer_dict.named_parameters():
+            same = torch.equal(param, initial_weights[f"mpnn_layer_{i}"][name])
+            print(f"  Weights {name}: {'Unchanged' if same else 'Changed'}")
 
     logging.info('Restoring best model from checkpoint...')
     checkpoint = torch.load(args.checkpoint_path, weights_only=True)

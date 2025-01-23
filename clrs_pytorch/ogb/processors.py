@@ -83,7 +83,7 @@ class PGN(Processor):
         activation: Optional[Callable] = F.relu,
         reduction: Callable = torch.max,
         msgs_mlp_sizes: Optional[List[int]] = None,
-        use_ln: bool = False,
+        use_ln: bool = True,
         use_triplets: bool = False,
         nb_triplet_fts: int = 8,
         gated: bool = False,
