@@ -109,13 +109,6 @@ def main():
     valid_acc_list = []
     test_acc_list = []
 
-    # Save initial weights
-    initial_weights = {}
-    for i, layer_dict in enumerate(model.layers):
-        initial_weights[f"mpnn_layer_{i}"] = {
-            name: param.clone() for name, param in layer_dict.named_parameters()
-        }
-
     # Training loop
     for epoch in range(1, args.epochs + 1):
         print(f"Epoch {epoch}")
@@ -141,14 +134,6 @@ def main():
         if early_stop_counter >= args.early_stop_patience:
             print(f"Early stopping triggered at epoch {epoch}.")
             break
-
-    # Compare weights after training
-    for i, layer_dict in enumerate(model.layers):
-        print(f"Checking weights for layer {i}:")
-
-        for name, param in layer_dict.named_parameters():
-            same = torch.equal(param, initial_weights[f"mpnn_layer_{i}"][name])
-            print(f"  Weights {name}: {'Unchanged' if same else 'Changed'}")
 
     logging.info('Restoring best model from checkpoint...')
     checkpoint = torch.load(args.checkpoint_path, weights_only=True)
