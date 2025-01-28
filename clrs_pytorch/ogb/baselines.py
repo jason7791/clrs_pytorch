@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch_geometric.utils import to_dense_adj, to_dense_batch
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 
-from processors import MPNN
+from clrs_pytorch._src.processors import MPNN
 
 # Function to compute weight norms
 def print_weight_norms(model, prefix=""):

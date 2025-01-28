@@ -126,10 +126,11 @@ class PGN(Processor):
         if self._msgs_mlp_sizes is not None:
             mlp_layers = []
             input_size = self.mid_size
-            for size in self._msgs_mlp_sizes:
-                mlp_layers.append(nn.Linear(input_size, size))
-                mlp_layers.append(nn.ReLU())
-                input_size = size
+            for i in range(len(self._msgs_mlp_sizes)):
+                mlp_layers.append(nn.Linear(input_size, self._msgs_mlp_sizes[i]))
+                if(i < len(self._msgs_mlp_sizes) - 1):
+                    mlp_layers.append(nn.ReLU())
+                input_size = self._msgs_mlp_sizes[i]
             self.mlp = nn.Sequential(*mlp_layers)
             
         if self.use_triplets:
