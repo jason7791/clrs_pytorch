@@ -146,10 +146,7 @@ class ParallelMPNNModel(nn.Module):
             concatenated_output = torch.cat([random_output, pretrained_output], dim=-1)  # B x N x 2F
 
             # Reduce concatenated output back to F using a linear layer
-            reduced_output = F.relu(self.reduction_layer[i](concatenated_output))  # B x N x F
-
-            # Update for the next layer
-            hidden = reduced_output
+            hidden = F.relu(self.reduction_layer[i](concatenated_output))  # B x N x F
 
         # Compute graph embeddings by mean pooling over nodes
         graph_emb = hidden.mean(dim=1)  # B x F
