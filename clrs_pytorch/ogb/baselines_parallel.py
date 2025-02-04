@@ -59,6 +59,7 @@ class ParallelMPNNModel(nn.Module):
                 mid_size=hidden_dim,
                 reduction=reduction,
                 activation=F.relu,
+                use_ln=True,
                 msgs_mlp_sizes=[hidden_dim, hidden_dim]
             )
 
@@ -67,6 +68,7 @@ class ParallelMPNNModel(nn.Module):
                 mid_size=hidden_dim,
                 reduction=reduction,
                 activation=F.relu,
+                use_ln=True,
                 msgs_mlp_sizes=[hidden_dim, hidden_dim]
             )
 

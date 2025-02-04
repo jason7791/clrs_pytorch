@@ -55,6 +55,7 @@ class BaselineModel(nn.Module):
                 mid_size=hidden_dim,
                 reduction=reduction,
                 activation=F.relu,
+                use_ln=True,
                 msgs_mlp_sizes=[hidden_dim, hidden_dim]
             )
             if use_pretrain_weights:
