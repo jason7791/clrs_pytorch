@@ -115,8 +115,8 @@ class BaselineModel(nn.Module):
 
         hidden = torch.zeros_like(node_fts_dense, device=device) # B x N x F
 
-        for pgn_layer in self.layers:
-            node_fts, _ = pgn_layer(
+        for layer in self.layers:
+            node_fts, nxt_edge = layer(
                 node_fts=node_fts_dense.to(device), 
                 edge_fts=edge_fts_dense.to(device),
                 graph_fts=graph_fts.to(device),
