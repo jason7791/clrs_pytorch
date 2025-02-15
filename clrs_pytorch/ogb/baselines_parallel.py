@@ -138,31 +138,46 @@ class ParallelMPNNModel(nn.Module):
 
         current_edge_fts = edge_fts_dense
 
+        triplet_msgs = None
+
         for i, layer_dict in enumerate(self.layers):
             random_mpnn = layer_dict['random']
             pretrained_mpnn = layer_dict['pretrained']
-
-            random_output, random_nxt_edge = random_mpnn(
-                node_fts=node_fts_dense,
-                edge_fts=current_edge_fts,
-                graph_fts=graph_fts,
-                adj_mat=adj_mat,
-                hidden=hidden
-            )
-            pretrained_output, pretrained_nxt_edge = pretrained_mpnn(
-                node_fts=node_fts_dense,
-                edge_fts=current_edge_fts,
-                graph_fts=graph_fts,
-                adj_mat=adj_mat,
-                hidden=hidden
-            )
+            if self.use_triplets:
+                random_output, triplet_msgs = random_mpnn(
+                    node_fts=node_fts_dense,
+                    edge_fts=current_edge_fts,
+                    graph_fts=graph_fts,
+                    adj_mat=adj_mat,
+                    hidden=hidden,
+                    triplet_msgs=triplet_msgs
+                )
+                pretrained_output, triplet_msgs = pretrained_mpnn(
+                    node_fts=node_fts_dense,
+                    edge_fts=current_edge_fts,
+                    graph_fts=graph_fts,
+                    adj_mat=adj_mat,
+                    hidden=hidden,
+                    triplet_msgs=triplet_msgs
+                )
+            else:
+                random_output, _ = random_mpnn(
+                    node_fts=node_fts_dense,
+                    edge_fts=current_edge_fts,
+                    graph_fts=graph_fts,
+                    adj_mat=adj_mat,
+                    hidden=hidden
+                )
+                pretrained_output, _ = pretrained_mpnn(
+                    node_fts=node_fts_dense,
+                    edge_fts=current_edge_fts,
+                    graph_fts=graph_fts,
+                    adj_mat=adj_mat,
+                    hidden=hidden
+                )
             concatenated_output = torch.cat([random_output, pretrained_output], dim=-1)  # B x N x 2F
             hidden = F.relu(self.reduction_layer[i](concatenated_output))  # B x N x F
 
-            if(self.use_triplets):
-                combined_edge_fts = torch.cat([edge_fts_dense, random_nxt_edge, pretrained_nxt_edge], 
-                                              dim=-1) # B x N x N x 3F
-                current_edge_fts = self.edge_reducers[i](combined_edge_fts) # B x N x N x F
 
         # Compute graph embeddings by mean pooling over nodes
         graph_emb = hidden.mean(dim=1)  # B x F

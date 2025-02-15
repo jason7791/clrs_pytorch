@@ -125,21 +125,28 @@ class BaselineModel(nn.Module):
         graph_fts = torch.zeros((num_graphs, edge_feature_dim), device=device) # B x F
 
         hidden = torch.zeros_like(node_fts_dense, device=device) # B x N x F
-        
-        current_edge_fts = edge_fts_dense
+
+        triplet_msgs = None
 
         for i, layer in enumerate(self.layers):
-            node_fts, nxt_edge = layer(
-                node_fts=node_fts_dense, 
-                edge_fts=current_edge_fts,
-                graph_fts=graph_fts,
-                adj_mat=adj_mat,
-                hidden=hidden
-            )
+            if self.use_triplets:
+                node_fts, triplet_msgs = layer(
+                    node_fts=node_fts_dense, 
+                    edge_fts=edge_fts_dense,
+                    graph_fts=graph_fts,
+                    adj_mat=adj_mat,
+                    hidden=hidden,
+                    triplet_msgs=triplet_msgs
+                )
+            else:
+                node_fts, _ = layer(
+                    node_fts=node_fts_dense, 
+                    edge_fts=edge_fts_dense,
+                    graph_fts=graph_fts,
+                    adj_mat=adj_mat,
+                    hidden=hidden,
+                )
             hidden = node_fts  
-            if(self.use_triplets):
-                combined_edge_fts = torch.cat([edge_fts_dense, nxt_edge], dim=-1)
-                current_edge_fts = self.edge_reducers[i](combined_edge_fts)
 
         graph_emb = node_fts.mean(dim=1)  # B x F
 
