@@ -49,7 +49,7 @@ class ParallelMPNNModel(nn.Module):
         super(ParallelMPNNModel, self).__init__()
         self.num_layers = num_layers
         self.use_pretrain_weights = use_pretrain_weights
-
+        self.use_triplets = use_triplets
         self.layers = nn.ModuleList()
         self.reduction_layer = nn.ModuleList()
 
