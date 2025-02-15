@@ -173,6 +173,7 @@ class PGN(Processor):
         graph_fts: _Array,
         adj_mat: _Array,
         hidden: _Array,
+        triplet_msgs=None,
         **unused_kwargs,
     ) -> Tuple[_Array, Optional[_Array]]:
         """PGN inference step."""
@@ -193,7 +194,6 @@ class PGN(Processor):
         tri_msgs = None
 
         if self.use_triplets:
-            # Triplet messages, as done by Dudzik and Velickovic (2022)
             triplets = self.get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
             tri_msgs = self.o3(torch.max(triplets, dim=1).values)  # (B, N, N, H)
 
@@ -202,10 +202,16 @@ class PGN(Processor):
 
 
         # Message aggregation
-        msgs = (
-            msg_1.unsqueeze(1) + msg_2.unsqueeze(2) +
-            msg_e + msg_g.unsqueeze(1).unsqueeze(2)
-        )  # Shape: (B, N, N, F_mid)
+        if triplet_msgs:
+            msgs = (
+                msg_1.unsqueeze(1) + msg_2.unsqueeze(2) +
+                msg_e + msg_g.unsqueeze(1).unsqueeze(2) + triplet_msgs
+            )  # Shape: (B, N, N, F_mid)
+        else:
+            msgs = (
+                msg_1.unsqueeze(1) + msg_2.unsqueeze(2) +
+                msg_e + msg_g.unsqueeze(1).unsqueeze(2)
+            )  # Shape: (B, N, N, F_mid)
 
         if self._msgs_mlp_sizes is not None:
             msgs = self.mlp(F.relu(msgs))
