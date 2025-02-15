@@ -94,7 +94,7 @@ class BaselineModel(nn.Module):
 
         if(use_triplets):
             self.edge_reducers = nn.ModuleList([
-            nn.Linear(2 * hidden_dim, hidden_dim)
+            nn.Linear(3 * hidden_dim, hidden_dim)
             for _ in range(num_layers)
         ])
 

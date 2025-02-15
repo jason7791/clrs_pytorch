@@ -91,7 +91,7 @@ class ParallelMPNNModel(nn.Module):
             }))
 
             # Add a linear layer to reduce concatenated output from 2F to F
-            self.reduction_layer.append(nn.Linear(3 * hidden_dim, hidden_dim))
+            self.reduction_layer.append(nn.Linear(2 * hidden_dim, hidden_dim))
 
         self.graph_pred = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
@@ -105,7 +105,7 @@ class ParallelMPNNModel(nn.Module):
 
         if(use_triplets):
             self.edge_reducers = nn.ModuleList([
-            nn.Linear(2 * hidden_dim, hidden_dim)
+            nn.Linear(3 * hidden_dim, hidden_dim)
             for _ in range(num_layers)
         ])
 
@@ -161,8 +161,8 @@ class ParallelMPNNModel(nn.Module):
 
             if(self.use_triplets):
                 combined_edge_fts = torch.cat([edge_fts_dense, random_nxt_edge, pretrained_nxt_edge], 
-                                              dim=-1)
-                current_edge_fts = self.edge_reducers[i](combined_edge_fts)
+                                              dim=-1) # B x N x N x 3F
+                current_edge_fts = self.edge_reducers[i](combined_edge_fts) # B x N x N x F
 
         # Compute graph embeddings by mean pooling over nodes
         graph_emb = hidden.mean(dim=1)  # B x F
