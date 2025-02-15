@@ -44,10 +44,11 @@ def restore_model(model, pretrained_weights_path):
     
 
 class BaselineModel(nn.Module):
-    def __init__(self, out_dim, hidden_dim, num_layers, reduction, use_pretrain_weights, pretrained_weights_path):
+    def __init__(self, out_dim, hidden_dim, num_layers, reduction, use_pretrain_weights, pretrained_weights_path,
+                 use_triplets,  gated, nb_triplet_fts=8 ):
         super(BaselineModel, self).__init__()
         self.num_layers = num_layers
-
+        self.use_triplets = use_triplets
         self.layers = nn.ModuleList()
         for i in range(num_layers):
             mpnn_layer = MPNN(
@@ -56,7 +57,11 @@ class BaselineModel(nn.Module):
                 reduction=reduction,
                 activation=F.relu,
                 use_ln=True,
-                msgs_mlp_sizes=[hidden_dim, hidden_dim]
+                msgs_mlp_sizes=[hidden_dim, hidden_dim],
+                use_triplets=use_triplets,
+                nb_triplet_fts=nb_triplet_fts,
+                gated=gated,
+
             )
             if use_pretrain_weights:
                 if(i%2==1): #even layers
@@ -87,6 +92,12 @@ class BaselineModel(nn.Module):
         self.atom_encoder = AtomEncoder(emb_dim = hidden_dim)
         self.bond_encoder = BondEncoder(emb_dim = hidden_dim)
 
+        if(use_triplets):
+            self.edge_reducers = nn.ModuleList([
+            nn.Linear(2 * hidden_dim, hidden_dim)
+            for _ in range(num_layers)
+        ])
+
     def forward(self, batch):
         x, edge_index, edge_attr, batch_idx = batch.x, batch.edge_index, batch.edge_attr, batch.batch
         device = x.device  
@@ -114,16 +125,21 @@ class BaselineModel(nn.Module):
         graph_fts = torch.zeros((num_graphs, edge_feature_dim), device=device) # B x F
 
         hidden = torch.zeros_like(node_fts_dense, device=device) # B x N x F
+        
+        current_edge_fts = edge_fts_dense
 
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             node_fts, nxt_edge = layer(
-                node_fts=node_fts_dense.to(device), 
-                edge_fts=edge_fts_dense.to(device),
-                graph_fts=graph_fts.to(device),
-                adj_mat=adj_mat.to(device),
-                hidden=hidden.to(device)
+                node_fts=node_fts_dense, 
+                edge_fts=current_edge_fts,
+                graph_fts=graph_fts,
+                adj_mat=adj_mat,
+                hidden=hidden
             )
-            hidden = node_fts  # Update hidden states
+            hidden = node_fts  
+            if(self.use_triplets):
+                combined_edge_fts = torch.cat([edge_fts_dense, nxt_edge], dim=-1)
+                current_edge_fts = self.edge_reducers[i](combined_edge_fts)
 
         graph_emb = node_fts.mean(dim=1)  # B x F
 

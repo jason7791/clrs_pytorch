@@ -63,6 +63,8 @@ def main():
     parser.add_argument("--early_stop_patience", type=int, default=10, help="Number of epochs to wait for validation performance to improve before stopping.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
     parser.add_argument("--model", type=str, default="serial", help="Parallel or Serial Model")
+    parser.add_argument("--gated", action="store_true", help="Use gating")
+    parser.add_argument("--use_triplets", action="store_true", help="Use triplet reasoning")
     args = parser.parse_args()
 
     # Setup
@@ -85,6 +87,8 @@ def main():
             reduction=torch.max,
             use_pretrain_weights=args.use_pretrain_weights, 
             pretrained_weights_path=args.pretrained_weights_path,
+            gated=args.gated,
+            use_triplets=args.use_triplets
         ).to(device)
     else:
         model = ParallelMPNNModel(
@@ -94,6 +98,8 @@ def main():
             reduction=torch.max,
             use_pretrain_weights=args.use_pretrain_weights, 
             pretrained_weights_path=args.pretrained_weights_path,
+            gated=args.gated,
+            use_triplets=args.use_triplets
         ).to(device)
     optimizer = optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()),

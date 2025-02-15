@@ -44,7 +44,8 @@ def restore_model(model, pretrained_weights_path):
     model.load_state_dict(updated_state_dict, strict=False)
     
 class ParallelMPNNModel(nn.Module):
-    def __init__(self, out_dim, hidden_dim, num_layers, reduction, use_pretrain_weights, pretrained_weights_path):
+    def __init__(self, out_dim, hidden_dim, num_layers, reduction, use_pretrain_weights, pretrained_weights_path,
+                  use_triplets,  gated, nb_triplet_fts=8 ):
         super(ParallelMPNNModel, self).__init__()
         self.num_layers = num_layers
         self.use_pretrain_weights = use_pretrain_weights
@@ -60,7 +61,10 @@ class ParallelMPNNModel(nn.Module):
                 reduction=reduction,
                 activation=F.relu,
                 use_ln=True,
-                msgs_mlp_sizes=[hidden_dim, hidden_dim]
+                msgs_mlp_sizes=[hidden_dim, hidden_dim],
+                use_triplets=use_triplets,
+                nb_triplet_fts=nb_triplet_fts,
+                gated=gated,
             )
 
             pretrained_mpnn = MPNN(
@@ -69,7 +73,10 @@ class ParallelMPNNModel(nn.Module):
                 reduction=reduction,
                 activation=F.relu,
                 use_ln=True,
-                msgs_mlp_sizes=[hidden_dim, hidden_dim]
+                msgs_mlp_sizes=[hidden_dim, hidden_dim],
+                use_triplets=use_triplets,
+                nb_triplet_fts=nb_triplet_fts,
+                gated=gated,
             )
 
             if use_pretrain_weights:
@@ -84,7 +91,7 @@ class ParallelMPNNModel(nn.Module):
             }))
 
             # Add a linear layer to reduce concatenated output from 2F to F
-            self.reduction_layer.append(nn.Linear(2 * hidden_dim, hidden_dim))
+            self.reduction_layer.append(nn.Linear(3 * hidden_dim, hidden_dim))
 
         self.graph_pred = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
@@ -95,6 +102,12 @@ class ParallelMPNNModel(nn.Module):
         # Input encoders
         self.atom_encoder = AtomEncoder(emb_dim=hidden_dim)
         self.bond_encoder = BondEncoder(emb_dim=hidden_dim)
+
+        if(use_triplets):
+            self.edge_reducers = nn.ModuleList([
+            nn.Linear(2 * hidden_dim, hidden_dim)
+            for _ in range(num_layers)
+        ])
 
     def forward(self, batch):
         x, edge_index, edge_attr, batch_idx = batch.x, batch.edge_index, batch.edge_attr, batch.batch
@@ -123,32 +136,33 @@ class ParallelMPNNModel(nn.Module):
 
         hidden = torch.zeros_like(node_fts_dense, device=device)  # B x N x F
 
+        current_edge_fts = edge_fts_dense
+
         for i, layer_dict in enumerate(self.layers):
-            # Parallel MPNNs
             random_mpnn = layer_dict['random']
             pretrained_mpnn = layer_dict['pretrained']
 
-            random_output, _ = random_mpnn(
-                node_fts=node_fts_dense.to(device),
-                edge_fts=edge_fts_dense.to(device),
-                graph_fts=graph_fts.to(device),
-                adj_mat=adj_mat.to(device),
-                hidden=hidden.to(device)
+            random_output, random_nxt_edge = random_mpnn(
+                node_fts=node_fts_dense,
+                edge_fts=current_edge_fts,
+                graph_fts=graph_fts,
+                adj_mat=adj_mat,
+                hidden=hidden
             )
-
-            pretrained_output, _ = pretrained_mpnn(
-                node_fts=node_fts_dense.to(device),
-                edge_fts=edge_fts_dense.to(device),
-                graph_fts=graph_fts.to(device),
-                adj_mat=adj_mat.to(device),
-                hidden=hidden.to(device)
+            pretrained_output, pretrained_nxt_edge = pretrained_mpnn(
+                node_fts=node_fts_dense,
+                edge_fts=current_edge_fts,
+                graph_fts=graph_fts,
+                adj_mat=adj_mat,
+                hidden=hidden
             )
-
-            # Concatenate outputs from the two MPNNs
             concatenated_output = torch.cat([random_output, pretrained_output], dim=-1)  # B x N x 2F
-
-            # Reduce concatenated output back to F using a linear layer
             hidden = F.relu(self.reduction_layer[i](concatenated_output))  # B x N x F
+
+            if(self.use_triplets):
+                combined_edge_fts = torch.cat([edge_fts_dense, random_nxt_edge, pretrained_nxt_edge], 
+                                              dim=-1)
+                current_edge_fts = self.edge_reducers[i](combined_edge_fts)
 
         # Compute graph embeddings by mean pooling over nodes
         graph_emb = hidden.mean(dim=1)  # B x F
