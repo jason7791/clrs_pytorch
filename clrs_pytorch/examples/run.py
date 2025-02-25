@@ -439,7 +439,6 @@ def move_feedback_to_device(feedback, device):
 
 
 def train(model,optimizer,feedback, algo_idx , grad_clip_max_norm, device):
-    model.train()
     feedback = move_feedback_to_device(feedback, device)
     output_preds, hint_preds = model(feedback, algo_idx)
     optimizer.zero_grad()
@@ -602,6 +601,7 @@ def main(unused_argv):
 
     # Training step.
     for algo_idx, feedback in enumerate(feedback_list):
+      model.train()
       cur_loss = train(model, optimizer, feedback, algo_idx, FLAGS.grad_clip_max_norm, device)
       current_train_items[algo_idx] += len(feedback.features.lengths)
       logging.info('Algo %s step %i current loss %f, current_train_items %i.',
@@ -610,6 +610,7 @@ def main(unused_argv):
 
     # Periodically evaluate model
     if step >= next_eval:
+      model.eval()
       for algo_idx in range(len(train_samplers)):
         common_extras = {'examples_seen': current_train_items[algo_idx],
                          'step': step,

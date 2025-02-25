@@ -21,7 +21,6 @@ from typing import Any, Callable, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 # Type aliases for better readability
 _Array = torch.Tensor
