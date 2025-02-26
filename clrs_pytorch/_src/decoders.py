@@ -62,8 +62,8 @@ def log_sinkhorn(x: _Array, steps: int, temperature: float, zero_diagonal: bool,
   if zero_diagonal:
     x = x - 1e6 * torch.eye(x.shape[-1], device=x.device)
   for _ in range(steps):
-    x = F.log_softmax(x, axis=-1)
-    x = F.log_softmax(x, axis=-2)
+    x = F.log_softmax(x, dim=-1)
+    x = F.log_softmax(x, dim=-2)
   return x
 
 def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int, name: str):

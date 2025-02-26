@@ -15,33 +15,40 @@
 
 """Unit tests for `decoders.py`."""
 
-from absl.testing import absltest
+import unittest
+import torch
+import torch.nn.functional as F
 
-import chex
 from clrs_pytorch._src import decoders
-import jax
-import jax.numpy as jnp
 
 
-class DecodersTest(absltest.TestCase):
+class DecodersTest(unittest.TestCase):
+    def test_log_sinkhorn(self):
+        # Create a random tensor of shape [10, 10] using PyTorch.
+        x = torch.randn(10, 10)
+        # Run the log_sinkhorn operator and exponentiate to get a doubly-stochastic matrix.
+        y = torch.exp(decoders.log_sinkhorn(x, steps=10, temperature=1.0,
+                                             zero_diagonal=False,
+                                             noise_rng_key=None))
+        # Verify that each row sums to 1.
+        self.assertTrue(torch.allclose(y.sum(dim=-1), torch.ones(10), atol=1e-4))
+        # Verify that each column sums to 1.
+        self.assertTrue(torch.allclose(y.sum(dim=-2), torch.ones(10), atol=1e-4))
 
-  def test_log_sinkhorn(self):
-    x = jax.random.normal(jax.random.PRNGKey(42), (10, 10))
-    y = jnp.exp(decoders.log_sinkhorn(x, steps=10, temperature=1.0,
-                                      zero_diagonal=False,
-                                      noise_rng_key=None))
-    chex.assert_trees_all_close(jnp.sum(y, axis=-1), 1., atol=1e-4)
-    chex.assert_trees_all_close(jnp.sum(y, axis=-2), 1., atol=1e-4)
-
-  def test_log_sinkhorn_zero_diagonal(self):
-    x = jax.random.normal(jax.random.PRNGKey(42), (10, 10))
-    y = jnp.exp(decoders.log_sinkhorn(x, steps=10, temperature=1.0,
-                                      zero_diagonal=True,
-                                      noise_rng_key=None))
-    chex.assert_trees_all_close(jnp.sum(y, axis=-1), 1., atol=1e-4)
-    chex.assert_trees_all_close(jnp.sum(y, axis=-2), 1., atol=1e-4)
-    chex.assert_trees_all_close(jnp.sum(y.diagonal()), 0., atol=1e-4)
+    def test_log_sinkhorn_zero_diagonal(self):
+        # Create a random tensor of shape [10, 10] using PyTorch.
+        x = torch.randn(10, 10)
+        # Run the log_sinkhorn operator with zero_diagonal=True.
+        y = torch.exp(decoders.log_sinkhorn(x, steps=10, temperature=1.0,
+                                             zero_diagonal=True,
+                                             noise_rng_key=None))
+        # Verify that each row sums to 1.
+        self.assertTrue(torch.allclose(y.sum(dim=-1), torch.ones(10), atol=1e-4))
+        # Verify that each column sums to 1.
+        self.assertTrue(torch.allclose(y.sum(dim=-2), torch.ones(10), atol=1e-4))
+        # Verify that the diagonal elements are nearly zero.
+        self.assertTrue(torch.allclose(torch.diag(y), torch.zeros(10), atol=1e-4))
 
 
 if __name__ == '__main__':
-  absltest.main()
+    unittest.main()
