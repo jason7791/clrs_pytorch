@@ -1,4 +1,4 @@
-# Copyright 2022 DeepMind Technologies Limited. All Rights Reserved.
+# Copyright 2021 DeepMind Technologies Limited. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,155 +12,128 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+"""Unit tests for loss utility functions in losses.py."""
 
-"""Unit tests for `losses.py`."""
-
-from typing import Generator
-
-from absl.testing import absltest
-from absl.testing import parameterized
-
-from clrs_pytorch._src import dataset
-from clrs_pytorch._src import losses
-from clrs_pytorch._src import probing
-from clrs_pytorch._src import samplers
-from clrs_pytorch._src import specs
-import jax
-import jax.numpy as jnp
+import unittest
+import copy
+import torch
 import numpy as np
 
-_Array = np.ndarray
-_Location = specs.Location
+from clrs_pytorch._src import losses, specs, probing
 
+# -----------------------------------------------------------------------------
+# Dummy DataPoint for Testing
+# -----------------------------------------------------------------------------
 
-def _make_sampler(algo: str, nb_nodes: int) -> samplers.Sampler:
-  sampler, _ = samplers.build_sampler(
-      algo,
-      seed=samplers.CLRS30['val']['seed'],
-      num_samples=samplers.CLRS30['val']['num_samples'],
-      length=nb_nodes,
-  )
-  return sampler
+class DummyDataPoint:
+    """A simple dummy data point mimicking probing.DataPoint."""
+    def __init__(self, name, location, type_, data):
+        self.name = name
+        self.location = location
+        self.type_ = type_
+        self.data = data
 
+# -----------------------------------------------------------------------------
+# Losses Test Suite
+# -----------------------------------------------------------------------------
 
-def _make_iterable_sampler(
-    algo: str, batch_size: int,
-    nb_nodes: int) -> Generator[samplers.Feedback, None, None]:
-  sampler = _make_sampler(algo, nb_nodes)
-  while True:
-    yield sampler.next(batch_size)
+class LossesTest(unittest.TestCase):
+    def setUp(self):
+        self.device = torch.device("cpu")
+        self.nb_nodes = 5
+        self.EPS = 1e-12
+        # For testing, we assume that these constants are defined in specs.
+        self._Type = specs.Type
+        self._OutputClass = specs.OutputClass
 
+    def test_output_loss_scalar(self):
+        """Test output_loss for a scalar truth."""
+        truth_data = torch.tensor([1.0, 2.0, 3.0])
+        dp = DummyDataPoint("scalar", "node", self._Type.SCALAR, truth_data)
+        pred = torch.tensor([2.0, 2.0, 2.0])
+        # Expected loss = mean((pred - truth)^2) = mean([1, 0, 1]) = 2/3.
+        expected_loss = (1.0 + 0.0 + 1.0) / 3.0
+        loss_val = losses.output_loss(dp, pred, self.nb_nodes, self.device)
+        self.assertAlmostEqual(loss_val.item(), expected_loss, places=4)
 
-def _as_pred_data(x, nb_nodes, seed, batch_axis):
-  """Fake a prediction from a data point."""
-  # Permute along batch axis to make the prediction different.
-  key = jax.random.PRNGKey(seed)
-  data = jax.random.permutation(key, x.data, axis=batch_axis)
-  # Extend to one-hot for pointer types.
-  if x.type_ == specs.Type.POINTER:
-    return jax.nn.one_hot(data, nb_nodes)
-  return data
+    def test_output_loss_mask(self):
+        """Test output_loss for a MASK truth.
+        
+        Here we assume that specs.OutputClass.MASKED equals 0.
+        """
+        masked_value = self._OutputClass.MASKED  # Assumed to be -1.
+        truth_data = torch.tensor([1.0, masked_value, 1.0])
+        dp = DummyDataPoint("mask", "node", self._Type.MASK, truth_data)
+        pred = torch.tensor([2.0, 2.0, 2.0])
+        # For unmasked elements (indices 0 and 2):
+        #   loss = max(2, 0) - 2*1 + log1p(exp(-|2|)) = 2 - 2 + log1p(exp(-2))
+        expected_elem = float(torch.log1p(torch.exp(torch.tensor(-2.0))))
+        expected_loss = (expected_elem + expected_elem) / 2.0
+        loss_val = losses.output_loss(dp, pred, self.nb_nodes, self.device)
+        self.assertAlmostEqual(loss_val.item(), expected_loss, places=4)
 
+    def test_output_loss_mask_one(self):
+        """Test output_loss for a MASK_ONE (or CATEGORICAL) truth."""
+        # For this branch, assume:
+        #   - specs.OutputClass.MASKED equals -1.
+        #   - specs.OutputClass.POSITIVE equals 1.
+        truth_data = torch.tensor([1.0, 0.0, 0.0])
+        dp = DummyDataPoint("mask_one", "node", self._Type.MASK_ONE, truth_data)
+        pred = torch.tensor([1.0, 2.0, 3.0])
+        logsm = torch.nn.functional.log_softmax(pred, dim=-1)
+        numerator = -torch.sum(truth_data * (truth_data != 0).float() * logsm)
+        denominator = torch.sum(truth_data == 1).float()
+        expected_loss = numerator / denominator
+        loss_val = losses.output_loss(dp, pred, self.nb_nodes, self.device)
+        self.assertAlmostEqual(loss_val.item(), expected_loss.item(), places=4)
 
-def _mask_datapoint(x, seed, t_axis=None):
-  """Add some masking to data."""
-  key = jax.random.PRNGKey(seed)
-  data = x.data
-  if x.type_ == specs.Type.MASK:
-    # mask some data at random
-    mask_shape = list(data.shape)
-    if t_axis is not None:
-      mask_shape[t_axis] = 1
-    mask = jax.random.uniform(key, tuple(mask_shape)) < 0.2
-    data = jnp.where(mask, specs.OutputClass.MASKED, data)
-  elif x.type_ in [specs.Type.CATEGORICAL, specs.Type.MASK_ONE]:
-    # mask some data at random (all categories together)
-    mask_shape = list(data.shape)[:-1]
-    if t_axis is not None:
-      mask_shape[t_axis] = 1
-    mask = jax.random.uniform(key, tuple(mask_shape)) < 0.2
-    data = jnp.where(mask[..., None], specs.OutputClass.MASKED, data)
-  return probing.DataPoint(name=x.name, location=x.location, type_=x.type_,
-                           data=data)
+    def test_output_loss_pointer(self):
+        """Test output_loss for a POINTER truth."""
+        # For POINTER, truth.data is an integer tensor.
+        truth_data = torch.tensor([2])
+        dp = DummyDataPoint("pointer", "node", self._Type.POINTER, truth_data)
+        # pred should have shape [1, nb_nodes]. Using zeros so that log_softmax is uniform.
+        pred = torch.zeros(1, self.nb_nodes)
+        expected_loss = torch.log(torch.tensor(self.nb_nodes, dtype=torch.float32))
+        loss_val = losses.output_loss(dp, pred, self.nb_nodes, self.device)
+        self.assertAlmostEqual(loss_val.item(), expected_loss.item(), places=4)
 
+    def test_output_loss_permutation_pointer(self):
+        """Test output_loss for a PERMUTATION_POINTER truth."""
+        truth_data = torch.tensor([[0.0, 1.0],
+                                   [1.0, 0.0]])
+        dp = DummyDataPoint("perm_pointer", "node", self._Type.PERMUTATION_POINTER, truth_data)
+        pred = torch.tensor([[0.1, 0.2],
+                             [0.3, 0.4]])
+        # Row-wise: row0: - (0*0.1 + 1*0.2) = -0.2; row1: - (1*0.3 + 0*0.4) = -0.3.
+        expected_loss = (-0.2 + -0.3) / 2.0
+        loss_val = losses.output_loss(dp, pred, self.nb_nodes, self.device)
+        self.assertAlmostEqual(loss_val.item(), expected_loss, places=4)
 
-def _rand_diff(seed, shape):
-  return 2.0 * jax.random.uniform(jax.random.PRNGKey(seed), shape) - 1.0
+    def test_hint_loss(self):
+        """Test hint_loss for a scalar truth with time-dimension data."""
+        # Create dummy truth data with a time dimension.
+        # Use a 2D tensor so that time dimension and batch dimension are explicit.
+        truth_data = torch.tensor([[1.0], [2.0], [3.0]])  # Shape: [3, 1]
+        dp = DummyDataPoint("hint", "node", self._Type.SCALAR, truth_data)
+        # Provide preds as a list of column vectors, but squeeze the last dimension.
+        preds = [torch.tensor([[3.0]]).squeeze(-1), torch.tensor([[4.0]]).squeeze(-1)]
+        # After squeezing, each prediction has shape [1], so stacking yields shape [2].
+        # Expected: loss = (pred - truth[1:])^2 = ([3-2, 4-3])^2 = ([1, 1]).
+        # Average loss = 1.
+        lengths = torch.tensor([3])
+        loss_val = losses.hint_loss(dp, preds, lengths, self.nb_nodes, self.device)
+        self.assertAlmostEqual(loss_val.item(), 1.0, places=4)
 
-
-def _rand_mask(seed, shape, p=0.5):
-  return (jax.random.uniform(jax.random.PRNGKey(seed), shape) > p).astype(float)
-
-
-def invert(d):
-  """Dict of lists -> list of dicts."""
-  if d:
-    return [dict(zip(d, i)) for i in zip(*d.values())]
-
-
-def _create_data(algo, nb_nodes):
-  batch_size = 8
-
-  ds = _make_iterable_sampler(algo, batch_size, nb_nodes)
-  full_sample = next(ds)
-
-  chunk_length = full_sample.features.lengths[0].astype(int)
-  chunked_ds = dataset.chunkify(
-      _make_iterable_sampler(algo, batch_size, nb_nodes),
-      chunk_length)
-  chunk_sample = next(chunked_ds)
-  return full_sample, chunk_sample
-
-
-class FullVsChunkLossesTest(parameterized.TestCase):
-  """Test that the full and chunked versions of the losses match."""
-
-  # Test two algorithms with fixed-length, covering all data types
-  @parameterized.parameters('dfs', 'floyd_warshall')
-  def test_output_loss(self, algo):
-    nb_nodes = 16
-    full_sample, chunk_sample = _create_data(algo, nb_nodes)
-
-    # Calculate output loss.
-    for truth_full, truth_chunked in zip(full_sample.outputs,
-                                         chunk_sample.outputs):
-      chunk_output_loss = losses.output_loss_chunked(
-          truth=_mask_datapoint(truth_chunked, seed=0),
-          pred=_as_pred_data(truth_chunked, nb_nodes, 0, 1),
-          is_last=chunk_sample.features.is_last,
-          nb_nodes=nb_nodes,
-      )
-      full_output_loss = losses.output_loss(
-          truth=_mask_datapoint(truth_full, seed=0),
-          pred=_as_pred_data(truth_full, nb_nodes, 0, 0),
-          nb_nodes=nb_nodes,
-      )
-      np.testing.assert_allclose(chunk_output_loss, full_output_loss, rtol=1e-4)
-
-  @parameterized.parameters('dfs', 'floyd_warshall')
-  def test_hint_loss(self, algo):
-    nb_nodes = 16
-    full_sample, chunk_sample = _create_data(algo, nb_nodes)
-    for truth_full, truth_chunked in zip(full_sample.features.hints,
-                                         chunk_sample.features.hints):
-      np.testing.assert_array_equal(truth_full.data, truth_chunked.data)
-      pred = _as_pred_data(truth_chunked, nb_nodes, 0, 1)
-      chunk_hint_loss = losses.hint_loss_chunked(
-          truth=_mask_datapoint(truth_chunked, seed=1, t_axis=0),
-          pred=pred,
-          is_first=chunk_sample.features.is_first,
-          nb_nodes=nb_nodes,
-      )
-
-      full_preds = list(pred[1:])
-      full_hint_loss = losses.hint_loss(
-          truth=_mask_datapoint(truth_full, 1, t_axis=0),
-          preds=full_preds,
-          lengths=full_sample.features.lengths,
-          nb_nodes=nb_nodes,
-      )
-      np.testing.assert_allclose(chunk_hint_loss, full_hint_loss, rtol=1e-4)
+    def test_is_not_done_broadcast(self):
+        """Test that _is_not_done_broadcast returns the correct mask."""
+        lengths = [3, 4]
+        i = 1
+        tensor = torch.ones(2, 5)
+        mask = losses._is_not_done_broadcast(lengths, i, tensor, self.device)
+        expected = torch.ones(2, 5)
+        self.assertTrue(torch.allclose(mask, expected, atol=1e-4))
 
 
 if __name__ == '__main__':
-  absltest.main()
+    unittest.main()

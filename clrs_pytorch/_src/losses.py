@@ -29,53 +29,6 @@ _Type = specs.Type
 EPS = 1e-12
 
 
-def _expand_to(x: _Array, y: _Array) -> _Array:
-  while len(y.shape) > len(x.shape):
-    x = torch.unsqueeze(x, -1)
-  return x
-
-
-def _expand_and_broadcast_to(x: _Array, y: _Array) -> _Array:
-  return torch.broadcast_to(_expand_to(x, y), y.shape)
-
-
-def output_loss_chunked(truth: _DataPoint, pred: _Array,
-                        is_last: _Array, nb_nodes: int) -> float:
-  """Output loss for time-chunked training."""
-
-  mask = None
-
-  if truth.type_ == _Type.SCALAR:
-    loss = (pred - truth.data)**2
-
-  elif truth.type_ == _Type.MASK:
-    loss = (
-        torch.maximum(pred, 0) - pred * truth.data +
-        torch.log1p(torch.exp(-torch.abs(pred))))
-    mask = (truth.data != _OutputClass.MASKED)
-
-  elif truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
-    mask = torch.any(truth.data == _OutputClass.POSITIVE, dim=-1)
-    masked_truth = truth.data * (truth.data != _OutputClass.MASKED).float()
-    loss = -torch.sum(masked_truth * torch.nn.functional.log_softmax(pred), dim=-1)
-
-  elif truth.type_ == _Type.POINTER:
-    loss = -torch.sum(
-        torch.nn.functional.one_hot(truth.data, nb_nodes) * torch.nn.functional.log_softmax(pred), dim=-1)
-
-  elif truth.type_ == _Type.PERMUTATION_POINTER:
-    # Predictions are NxN logits aiming to represent a doubly stochastic matrix.
-    # Compute the cross entropy between doubly stochastic pred and truth_data
-    loss = -torch.sum(truth.data * pred, dim=-1)
-
-  if mask is not None:
-    mask = mask * _expand_and_broadcast_to(is_last, loss)
-  else:
-    mask = _expand_and_broadcast_to(is_last, loss)
-  total_mask = torch.maximum(torch.sum(mask), EPS)
-  return torch.sum(torch.where(mask, loss, 0.0)) / total_mask  # pytype: disable=bad-return-type  
-
-
 def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int, device) -> float:
   """Output loss for full-sample training."""
   if isinstance(truth.data, np.ndarray):
