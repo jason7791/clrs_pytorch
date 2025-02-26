@@ -18,9 +18,8 @@
 from absl.testing import absltest
 
 from clrs_pytorch._src import probing
-import jax.numpy as jnp
 import numpy as np
-
+import torch
 
 # pylint: disable=invalid-name
 
@@ -175,14 +174,14 @@ class ProbingTest(absltest.TestCase):
 class PermutationsTest(absltest.TestCase):
 
   def test_pointers_to_permutation(self):
-    pointers = jnp.array([2, 1, 1])
+    pointers = torch.tensor([2, 1, 1])
     perm, first = probing.predecessor_to_cyclic_predecessor_and_first(pointers)
     np.testing.assert_array_equal(
         perm, np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]]))
     np.testing.assert_array_equal(first, np.array([0, 1, 0]))
 
   def test_pointers_to_permutation_already_sorted(self):
-    pointers = jnp.array([0, 0, 1, 2, 3, 4])
+    pointers = torch.tensor([0, 0, 1, 2, 3, 4])
     perm, first = probing.predecessor_to_cyclic_predecessor_and_first(pointers)
     np.testing.assert_array_equal(perm, np.roll(np.eye(6), 1, 0))
     np.testing.assert_array_equal(first, np.eye(6)[0])

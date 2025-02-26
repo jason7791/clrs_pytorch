@@ -395,9 +395,8 @@ def permutation_matrix_to_predecessor_pointers(
   return pointers
 
 
-@functools.partial(np.vectorize, signature='(n)->(n,n),(n)')
 def predecessor_to_cyclic_predecessor_and_first(
-    pointers: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    pointers: torch.tensor) -> Tuple[np.ndarray, np.ndarray]:
   """Converts predecessor pointers to cyclic predecessor + first node mask.
 
   This function assumes that the pointers represent a linear order of the nodes
