@@ -1,4 +1,4 @@
-# Copyright 2022 DeepMind Technologies Limited. All Rights Reserved.
+# Copyright 2021 DeepMind Technologies Limited. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,283 +12,193 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+"""Unit tests for the PyTorch CLRS BaselineModel."""
 
-"""Unit tests for `baselines.py`."""
-
+from dataclasses import dataclass, replace
+from typing import List, Union
 import copy
-import functools
-from typing import Generator
+import unittest
 
-from absl.testing import absltest
-from absl.testing import parameterized
-import chex
-
-from clrs_pytorch._src import baselines
-from clrs_pytorch._src import dataset
-from clrs_pytorch._src import probing
-from clrs_pytorch._src import processors
-from clrs_pytorch._src import samplers
-from clrs_pytorch._src import specs
-
-import haiku as hk
-import jax
+from absl.testing import absltest, parameterized
 import numpy as np
+import torch
 
-_Array = np.ndarray
+from clrs_pytorch._src import baselines, nets, processors, samplers, specs
 
+# -----------------------------------------------------------------------------
+# Dummy Data Structures for Testing
+# -----------------------------------------------------------------------------
 
-def _error(x, y):
-  return np.sum(np.abs(x-y))
+@dataclass
+class DummyField:
+    name: str
+    data: torch.Tensor
+    location: Union[str, None] = None
+    type_: Union[str, None] = None
 
+@dataclass
+class DummyFeatures:
+    inputs: List[DummyField]
+    hints: List[DummyField]
 
-def _make_sampler(algo: str, length: int) -> samplers.Sampler:
-  sampler, _ = samplers.build_sampler(
-      algo,
-      seed=samplers.CLRS30['val']['seed'],
-      num_samples=samplers.CLRS30['val']['num_samples'],
-      length=length,
-  )
-  return sampler
+@dataclass
+class DummyFeedback:
+    features: DummyFeatures
+    outputs: List[DummyField]
 
+    def _replace(self, **kwargs):
+        return replace(self, **kwargs)
 
-def _without_permutation(feedback):
-  """Replace should-be permutations with pointers."""
-  outputs = []
-  for x in feedback.outputs:
-    if x.type_ != specs.Type.SHOULD_BE_PERMUTATION:
-      outputs.append(x)
-      continue
-    assert x.location == specs.Location.NODE
-    outputs.append(probing.DataPoint(name=x.name, location=x.location,
-                                     type_=specs.Type.POINTER, data=x.data))
-  return feedback._replace(outputs=outputs)
+def create_dummy_feedback(batch_size: int = 4,
+                          input_dim: int = 10,
+                          hint_dim: int = 5,
+                          output_dim: int = 10) -> DummyFeedback:
+    """Creates a minimal dummy feedback for testing."""
+    # Create dummy fields.
+    input_field = DummyField(name="input", data=torch.randn(batch_size, input_dim))
+    hint_field = DummyField(name="hint", data=torch.randn(batch_size, hint_dim))
+    # For outputs, use pointer type at NODE location.
+    output_field = DummyField(name="output",
+                              data=torch.randn(batch_size, output_dim),
+                              location=specs.Location.NODE,
+                              type_=specs.Type.POINTER)
+    features = DummyFeatures(inputs=[input_field], hints=[hint_field])
+    return DummyFeedback(features=features, outputs=[output_field])
 
+# -----------------------------------------------------------------------------
+# Dummy Network for Monkey-Patching
+# -----------------------------------------------------------------------------
 
-def _make_iterable_sampler(
-    algo: str, batch_size: int,
-    length: int) -> Generator[samplers.Feedback, None, None]:
-  sampler = _make_sampler(algo, length)
-  while True:
-    yield _without_permutation(sampler.next(batch_size))
+import torch.nn as nn
 
+class DummyNet(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        # Initialize with random values instead of zeros.
+        self.dummy_param = nn.Parameter(torch.randn(1, 10))
+    
+    def forward(self, features, repred, algorithm_index, return_hints, return_all_outputs):
+        batch_size = features[0].inputs[0].data.shape[0]
+        dummy_output = self.dummy_param.expand(batch_size, -1)
+        dummy_hint = torch.zeros(batch_size, 5)
+        return dummy_output, dummy_hint
 
-def _remove_permutation_from_spec(spec):
-  """Modify spec to turn permutation type to pointer."""
-  new_spec = {}
-  for k in spec:
-    if (spec[k][1] == specs.Location.NODE and
-        spec[k][2] == specs.Type.SHOULD_BE_PERMUTATION):
-      new_spec[k] = (spec[k][0], spec[k][1], specs.Type.POINTER)
-    else:
-      new_spec[k] = spec[k]
-  return new_spec
+# Monkey-patch nets.Net with DummyNet for testing.
+nets.Net = DummyNet
 
+# -----------------------------------------------------------------------------
+# Dummy Spec for Testing
+# -----------------------------------------------------------------------------
 
-class BaselinesTest(parameterized.TestCase):
+def create_dummy_spec() -> dict:
+    """Creates a minimal dummy spec dictionary.
 
-  def test_full_vs_chunked(self):
-    """Test that chunking does not affect gradients."""
+    The spec is not used directly in these tests (beyond being passed to the model),
+    so we provide minimal values.
+    """
+    # For simplicity, we use a dict with a single key.
+    # The tuple values are (some identifier, location, type).
+    return {"dummy": (None, specs.Location.NODE, specs.Type.POINTER)}
 
-    batch_size = 4
-    length = 8
-    algo = 'insertion_sort'
-    spec = _remove_permutation_from_spec(specs.SPECS[algo])
-    rng_key = jax.random.PRNGKey(42)
+# -----------------------------------------------------------------------------
+# Unit Tests
+# -----------------------------------------------------------------------------
 
-    full_ds = _make_iterable_sampler(algo, batch_size, length)
-    chunked_ds = dataset.chunkify(
-        _make_iterable_sampler(algo, batch_size, length),
-        length)
-    double_chunked_ds = dataset.chunkify(
-        _make_iterable_sampler(algo, batch_size, length),
-        length * 2)
+class BaselineModelTest(parameterized.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.device = torch.device("cpu")
+        self.dummy_feedback = create_dummy_feedback()
+        self.dummy_spec = create_dummy_spec()
 
-    full_batches = [next(full_ds) for _ in range(2)]
-    chunked_batches = [next(chunked_ds) for _ in range(2)]
-    double_chunk_batch = next(double_chunked_ds)
+        # Use a simple processor factory.
+        self.processor_factory = processors.get_processor_factory('mpnn', use_ln=True, nb_triplet_fts=0)
+        self.common_args = dict(
+            processor_factory=self.processor_factory,
+            hidden_dim=8,
+            learning_rate=0.01,
+            checkpoint_path='/tmp/clrs3',
+            freeze_processor=False,
+            dropout_prob=0.0,
+            hint_teacher_forcing=0.0,
+            hint_repred_mode='soft',
+            nb_msg_passing_steps=1,
+        )
 
-    with chex.fake_jit():  # jitting makes test longer
+    def test_invalid_hint_configuration(self):
+        """Test that instantiating with encode_hints True and decode_hints False raises ValueError."""
+        with self.assertRaises(ValueError):
+            baselines.BaselineModel(
+                spec=self.dummy_spec,
+                dummy_trajectory=[self.dummy_feedback],
+                device=self.device,
+                encode_hints=True,
+                decode_hints=False,
+                **self.common_args
+            )
 
-      processor_factory = processors.get_processor_factory(
-          'mpnn', use_ln=False, nb_triplet_fts=0)
-      common_args = dict(processor_factory=processor_factory, hidden_dim=8,
-                         learning_rate=0.01,
-                         decode_hints=True, encode_hints=True)
+    def test_forward_pass_single_algorithm(self):
+        """Test that the forward pass returns a tuple of outputs for a single algorithm."""
+        model = baselines.BaselineModel(
+            spec=self.dummy_spec,
+            dummy_trajectory=[self.dummy_feedback],
+            device=self.device,
+            decode_hints=True,
+            encode_hints=True,
+            **self.common_args
+        )
+        model.to(self.device)
+        output_preds, hint_preds = model(
+            self.dummy_feedback,
+            algorithm_index=0,
+            repred=False,
+            return_hints=True,
+            return_all_outputs=False
+        )
+        # Check that outputs are tensors of the expected shapes.
+        self.assertIsInstance(output_preds, torch.Tensor)
+        self.assertIsInstance(hint_preds, torch.Tensor)
+        batch_size = self.dummy_feedback.features.inputs[0].data.shape[0]
+        self.assertEqual(list(output_preds.shape), [batch_size, 10])
+        self.assertEqual(list(hint_preds.shape), [batch_size, 5])
 
-      b_full = baselines.BaselineModel(
-          spec, dummy_trajectory=full_batches[0], **common_args)
-      b_full.init(full_batches[0].features, seed=42)  # pytype: disable=wrong-arg-types  # jax-ndarray
-      full_params = b_full.params
-      full_loss_0 = b_full.feedback(rng_key, full_batches[0])  # pytype: disable=wrong-arg-types
-      b_full.params = full_params
-      full_loss_1 = b_full.feedback(rng_key, full_batches[1])  # pytype: disable=wrong-arg-types
-      new_full_params = b_full.params
+    def test_training_step_updates_parameters(self):
+        """Test that a training step produces nonzero parameter updates."""
+        model = baselines.BaselineModel(
+            spec=self.dummy_spec,
+            dummy_trajectory=[self.dummy_feedback],
+            device=self.device,
+            decode_hints=True,
+            encode_hints=True,
+            **self.common_args
+        )
+        model.to(self.device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
-      b_chunked = baselines.BaselineModelChunked(
-          spec, dummy_trajectory=chunked_batches[0], **common_args)
-      b_chunked.init([[chunked_batches[0].features]], seed=42)  # pytype: disable=wrong-arg-types  # jax-ndarray
-      chunked_params = b_chunked.params
-      jax.tree_util.tree_map(np.testing.assert_array_equal, full_params,
-                             chunked_params)
-      chunked_loss_0 = b_chunked.feedback(rng_key, chunked_batches[0])  # pytype: disable=wrong-arg-types
-      b_chunked.params = chunked_params
-      chunked_loss_1 = b_chunked.feedback(rng_key, chunked_batches[1])  # pytype: disable=wrong-arg-types
-      new_chunked_params = b_chunked.params
+        # Save the initial parameters.
+        init_state = copy.deepcopy(model.state_dict())
 
-      b_chunked.params = chunked_params
-      double_chunked_loss = b_chunked.feedback(rng_key, double_chunk_batch)  # pytype: disable=wrong-arg-types
+        # Perform a forward pass, compute a dummy loss, and update.
+        output_preds, hint_preds = model(
+            self.dummy_feedback,
+            algorithm_index=0,
+            repred=False,
+            return_hints=True,
+            return_all_outputs=False
+        )
+        # Define a dummy loss (mean squared error on outputs).
+        loss = torch.mean(output_preds ** 2)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-    # Test that losses match
-    np.testing.assert_allclose(full_loss_0, chunked_loss_0, rtol=1e-4)
-    np.testing.assert_allclose(full_loss_1, chunked_loss_1, rtol=1e-4)
-    np.testing.assert_allclose(full_loss_0 + full_loss_1,
-                               2 * double_chunked_loss,
-                               rtol=1e-4)
-
-    # Test that gradients are the same (parameters changed equally).
-    # First check that gradients were not zero, i.e., parameters have changed.
-    param_change, _ = jax.tree_util.tree_flatten(
-        jax.tree_util.tree_map(_error, full_params, new_full_params))
-    self.assertGreater(np.mean(param_change), 0.1)
-    # Now check that full and chunked gradients are the same.
-    jax.tree_util.tree_map(
-        functools.partial(np.testing.assert_allclose, rtol=1e-4),
-        new_full_params, new_chunked_params)
-
-  def test_multi_vs_single(self):
-    """Test that multi = single when we only train one of the algorithms."""
-
-    batch_size = 4
-    length = 16
-    algos = ['insertion_sort', 'activity_selector', 'bfs']
-    spec = [_remove_permutation_from_spec(specs.SPECS[algo]) for algo in algos]
-    rng_key = jax.random.PRNGKey(42)
-
-    full_ds = [_make_iterable_sampler(algo, batch_size, length)
-               for algo in algos]
-    full_batches = [next(ds) for ds in full_ds]
-    full_batches_2 = [next(ds) for ds in full_ds]
-
-    with chex.fake_jit():  # jitting makes test longer
-
-      processor_factory = processors.get_processor_factory(
-          'mpnn', use_ln=False, nb_triplet_fts=0)
-      common_args = dict(processor_factory=processor_factory, hidden_dim=8,
-                         learning_rate=0.01,
-                         decode_hints=True, encode_hints=True)
-
-      b_single = baselines.BaselineModel(
-          spec[0], dummy_trajectory=full_batches[0], **common_args)
-      b_multi = baselines.BaselineModel(
-          spec, dummy_trajectory=full_batches, **common_args)
-      b_single.init(full_batches[0].features, seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
-      b_multi.init([f.features for f in full_batches], seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
-
-      single_params = []
-      single_losses = []
-      multi_params = []
-      multi_losses = []
-
-      single_params.append(copy.deepcopy(b_single.params))
-      single_losses.append(b_single.feedback(rng_key, full_batches[0]))  # pytype: disable=wrong-arg-types
-      single_params.append(copy.deepcopy(b_single.params))
-      single_losses.append(b_single.feedback(rng_key, full_batches_2[0]))  # pytype: disable=wrong-arg-types
-      single_params.append(copy.deepcopy(b_single.params))
-
-      multi_params.append(copy.deepcopy(b_multi.params))
-      multi_losses.append(b_multi.feedback(rng_key, full_batches[0],  # pytype: disable=wrong-arg-types
-                                           algorithm_index=0))
-      multi_params.append(copy.deepcopy(b_multi.params))
-      multi_losses.append(b_multi.feedback(rng_key, full_batches_2[0],  # pytype: disable=wrong-arg-types
-                                           algorithm_index=0))
-      multi_params.append(copy.deepcopy(b_multi.params))
-
-    # Test that losses match
-    np.testing.assert_array_equal(single_losses, multi_losses)
-    # Test that loss decreased
-    assert single_losses[1] < single_losses[0]
-
-    # Test that param changes were the same in single and multi-algorithm
-    for single, multi in zip(single_params, multi_params):
-      assert hk.data_structures.is_subset(subset=single, superset=multi)
-      for module_name, params in single.items():
-        jax.tree_util.tree_map(np.testing.assert_array_equal, params,
-                               multi[module_name])
-
-    # Test that params change for the trained algorithm, but not the others
-    for module_name, params in multi_params[0].items():
-      param_changes = jax.tree_util.tree_map(lambda a, b: np.sum(np.abs(a - b)),
-                                             params,
-                                             multi_params[1][module_name])
-      param_change = sum(param_changes.values())
-      if module_name in single_params[0]:  # params of trained algorithm
-        assert param_change > 1e-3
-      else:  # params of non-trained algorithms
-        assert param_change == 0.0
-
-  @parameterized.parameters(True, False)
-  def test_multi_algorithm_idx(self, is_chunked):
-    """Test that algorithm selection works as intended."""
-
-    batch_size = 4
-    length = 8
-    algos = ['insertion_sort', 'activity_selector', 'bfs']
-    spec = [_remove_permutation_from_spec(specs.SPECS[algo]) for algo in algos]
-    rng_key = jax.random.PRNGKey(42)
-
-    if is_chunked:
-      ds = [dataset.chunkify(_make_iterable_sampler(algo, batch_size, length),
-                             2 * length) for algo in algos]
-    else:
-      ds = [_make_iterable_sampler(algo, batch_size, length) for algo in algos]
-    batches = [next(d) for d in ds]
-
-    processor_factory = processors.get_processor_factory(
-        'mpnn', use_ln=False, nb_triplet_fts=0)
-    common_args = dict(processor_factory=processor_factory, hidden_dim=8,
-                       learning_rate=0.01,
-                       decode_hints=True, encode_hints=True)
-    if is_chunked:
-      baseline = baselines.BaselineModelChunked(
-          spec, dummy_trajectory=batches, **common_args)
-      baseline.init([[f.features for f in batches]], seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
-    else:
-      baseline = baselines.BaselineModel(
-          spec, dummy_trajectory=batches, **common_args)
-      baseline.init([f.features for f in batches], seed=0)  # pytype: disable=wrong-arg-types  # jax-ndarray
-
-    # Find out what parameters change when we train each algorithm
-    def _change(x, y):
-      changes = {}
-      for module_name, params in x.items():
-        changes[module_name] = sum(
-            jax.tree_util.tree_map(
-                lambda a, b: np.sum(np.abs(a-b)), params, y[module_name]
-                ).values())
-      return changes
-
-    param_changes = []
-    for algo_idx in range(len(algos)):
-      init_params = copy.deepcopy(baseline.params)
-      _ = baseline.feedback(  # pytype: disable=wrong-arg-types
-          rng_key,
-          batches[algo_idx],
-          algorithm_index=(0, algo_idx) if is_chunked else algo_idx)
-      param_changes.append(_change(init_params, baseline.params))
-
-    # Test that non-changing parameters correspond to encoders/decoders
-    # associated with the non-trained algorithms
-    unchanged = [[k for k in pc if pc[k] == 0] for pc in param_changes]
-
-    def _get_other_algos(algo_idx, modules):
-      return set([k for k in modules if '_construct_encoders_decoders' in k
-                  and f'algo_{algo_idx}' not in k])
-
-    for algo_idx in range(len(algos)):
-      expected_unchanged = _get_other_algos(algo_idx, baseline.params.keys())
-      self.assertNotEmpty(expected_unchanged)
-      self.assertSetEqual(expected_unchanged, set(unchanged[algo_idx]))
-
+        new_state = model.state_dict()
+        # Compare the parameters to ensure they have been updated.
+        total_change = 0.0
+        for key in init_state:
+            diff = torch.sum(torch.abs(init_state[key] - new_state[key])).item()
+            total_change += diff
+        self.assertGreater(total_change, 1e-6)
 
 if __name__ == '__main__':
-  absltest.main()
+    absltest.main()

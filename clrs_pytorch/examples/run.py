@@ -645,6 +645,7 @@ def main(unused_argv):
   logging.info('Restoring best model from checkpoint...')
   restore_model(model, FLAGS.checkpoint_path)
 
+  model.eval()
   for algo_idx in range(len(train_samplers)):
     common_extras = {'examples_seen': current_train_items[algo_idx],
                      'step': step,
