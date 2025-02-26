@@ -24,11 +24,11 @@ class ProcessorTest(unittest.TestCase):
     def setUp(self):
         self.batch_size = 64
         self.num_nodes = 11
-        self.node_feature_size = 16
-        self.edge_feature_size = 8
-        self.graph_feature_size = 4
+        self.node_feature_size = 32
+        self.edge_feature_size = 32
+        self.graph_feature_size = 32
         self.hidden_size = 32
-        self.out_size = 64
+        self.out_size = 32
 
         # Initialize mock inputs for the processor
         self.node_features = torch.randn(self.batch_size, self.num_nodes, self.node_feature_size)
