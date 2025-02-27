@@ -344,7 +344,7 @@ class Net(torch.nn.Module):
         decoders_.append(dec)
 
     # Return as properly tracked nn.ModuleList
-    return nn.ModuleList(encoders_), nn.ModuleList(decoders_)
+    return encoders_, decoders_
 
 
   def _one_step_pred(
