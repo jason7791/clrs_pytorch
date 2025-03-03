@@ -18,6 +18,7 @@ from typing import Dict, List, Tuple
 import chex
 from clrs_pytorch._src import probing
 from clrs_pytorch._src import specs
+from clrs_pytorch._src.nets import _is_not_done_broadcast
 import numpy as np
 import torch
 
@@ -132,8 +133,3 @@ def _hint_loss(
   return loss, mask
 
 
-def _is_not_done_broadcast(lengths, i, tensor, device):
-  is_not_done = (torch.tensor(lengths, device=device, dtype=torch.float32) > i + 1) * 1.0
-  while len(is_not_done.shape) < len(tensor.shape):  # pytype: disable=attribute-error  # numpy-scalars
-    is_not_done = torch.unsqueeze(is_not_done, -1)
-  return is_not_done

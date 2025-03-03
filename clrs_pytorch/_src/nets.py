@@ -86,20 +86,17 @@ class Net(torch.nn.Module):
     self.device = device
 
     if self.use_lstm:
-        # Define the LSTM layer
         self.lstm = nn.LSTM(
             input_size=self.hidden_dim,
             hidden_size=self.hidden_dim,
             batch_first=True
         )
-
         self.lstm_init = self.initialize_lstm_state
     else:
         self.lstm = None
         self.lstm_init = lambda x: 0
 
   def initialize_lstm_state(self, batch_size):
-    # Create initial hidden and cell states
     h_0 = torch.zeros(1, batch_size, self.hidden_dim, device=self.device)
     c_0 = torch.zeros(1, batch_size, self.hidden_dim, device=self.device)
     return h_0, c_0
@@ -301,10 +298,7 @@ class Net(torch.nn.Module):
         return [dict(zip(d, i)) for i in zip(*d.values())]
 
     # Final output predictions
-    if return_all_outputs:
-        output_preds = {k: v for k, v in output_preds_accum.items()}
-    else:
-        output_preds = mp_state.output_preds
+    output_preds = output_preds_accum if return_all_outputs else mp_state.output_preds
 
     hint_preds = invert(hint_preds_accum) if return_hints else None
 
@@ -450,11 +444,7 @@ def _expand_to(x: _Array, y: _Array) -> _Array:
 def _is_not_done_broadcast(lengths, i, tensor, device):
     if not isinstance(lengths, torch.Tensor):
         lengths = torch.tensor(lengths, device=device, dtype=torch.float32)
-    # Create a mask where lengths > i + 1
     is_not_done = (lengths > i + 1).float()
-    
-    # Expand dimensions until `is_not_done` matches the rank of `tensor`
     while is_not_done.dim() < tensor.dim():
         is_not_done = is_not_done.unsqueeze(-1)
-    
     return is_not_done
