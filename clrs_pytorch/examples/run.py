@@ -92,6 +92,7 @@ flags.DEFINE_string('performance_path', '/Users/jasonwjh/Documents/clrs_pytorch/
                     'Path to save performance results.')
 flags.DEFINE_string('dataset_path', '/tmp/CLRS30', 'Path where the dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False, 'Freeze the processor of the model.')
+flags.DEFINE_boolean('resume', False, 'Resume training from the last saved checkpoint if available.')
 
 FLAGS = flags.FLAGS
 
@@ -449,6 +450,24 @@ def set_seed(seed: int):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def save_results(results):
+    """Save results to the performance path."""
+    try:
+        with open(FLAGS.performance_path, 'w') as f:
+            json.dump(results, f, indent=4)
+        logging.info('Results successfully saved to %s', FLAGS.performance_path)
+    except Exception as e:
+        logging.error('Failed to save results: %s', str(e))
+
+def restore_model_if_needed(model):
+    """Restore model if the resume flag is set and a checkpoint exists."""
+    if FLAGS.resume and os.path.exists(FLAGS.checkpoint_path):
+        logging.info('Resuming from checkpoint: %s', FLAGS.checkpoint_path)
+        restore_model(model, FLAGS.checkpoint_path)
+    else:
+        logging.info('No checkpoint found or resume flag is not set. Starting fresh.')
+
+
 def main(unused_argv):
     # Determine hint configuration.
     if FLAGS.hint_mode == 'encoded_decoded':
@@ -517,15 +536,26 @@ def main(unused_argv):
         **model_params
     ).to(device)
 
+    restore_model_if_needed(model)
+    
     best_score = -1.0
     current_train_items = [0] * len(FLAGS.algorithms)
     step = 0
     next_eval = 0
     val_scores = [-99999.9] * len(FLAGS.algorithms)
 
-    # Dictionaries for tracking accuracies.
-    val_accuracies = {algo: [] for algo in FLAGS.algorithms}
-    test_accuracies = {algo: [] for algo in FLAGS.algorithms}
+    # Load previous performance results if resuming
+    results = {
+        "valid_accuracies": {algo: [] for algo in FLAGS.algorithms},
+        "test_accuracies": {algo: [] for algo in FLAGS.algorithms}
+    }
+    if FLAGS.resume and os.path.exists(FLAGS.performance_path):
+        try:
+            with open(FLAGS.performance_path, 'r') as f:
+                results = json.load(f)
+            logging.info('Loaded previous results from %s', FLAGS.performance_path)
+        except Exception as e:
+            logging.error('Failed to load previous results: %s', str(e))
 
     optimizer = optim.Adam(model.parameters(), lr=FLAGS.learning_rate)
 
@@ -562,7 +592,8 @@ def main(unused_argv):
                 logging.info('(val) Algo %s step %d: %s',
                              FLAGS.algorithms[algo_idx], step, val_stats)
                 val_scores[algo_idx] = val_stats['score']
-                val_accuracies[FLAGS.algorithms[algo_idx]].append(val_stats['score'])
+                results["valid_accuracies"][FLAGS.algorithms[algo_idx]].append(val_stats['score'])
+
             next_eval += FLAGS.eval_every
 
             msg = (f'Best avg val score: {best_score/len(FLAGS.algorithms):.3f}, '
@@ -575,6 +606,8 @@ def main(unused_argv):
                 save_model(model, FLAGS.checkpoint_path)
             else:
                 logging.info('Not saving new best model: %s', msg)
+
+            save_results(results)
 
         step += 1
 
@@ -597,17 +630,11 @@ def main(unused_argv):
             device=device
         )
         logging.info('(test) Algo %s: %s', FLAGS.algorithms[algo_idx], test_stats)
-        test_accuracies[FLAGS.algorithms[algo_idx]].append(test_stats['score'])
+        results["test_accuracies"][FLAGS.algorithms[algo_idx]].append(test_stats['score'])
 
-    results = {
-        "valid_accuracies": val_accuracies,
-        "test_accuracies": test_accuracies
-    }
 
-    with open(FLAGS.performance_path, 'w') as f:
-        json.dump(results, f)
-
-    logging.info('Training complete. Results saved.')
+    save_results(results)
+    logging.info('Training complete. Final results saved.')
 
 if __name__ == '__main__':
     app.run(main)
