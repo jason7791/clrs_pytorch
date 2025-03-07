@@ -201,7 +201,7 @@ class PGN(Processor):
 
 
         # Message aggregation
-        if triplet_msgs:
+        if triplet_msgs is not None:
             msgs = (
                 msg_1.unsqueeze(1) + msg_2.unsqueeze(2) +
                 msg_e + msg_g.unsqueeze(1).unsqueeze(2) + triplet_msgs
