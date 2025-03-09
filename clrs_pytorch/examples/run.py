@@ -555,6 +555,12 @@ def main(unused_argv):
             logging.info('Loaded previous results from %s', FLAGS.performance_path)
         except Exception as e:
             logging.error('Failed to load previous results: %s', str(e))
+    
+    # Assume all algorithms have the same number of eval steps recorded.
+    if FLAGS.resume and results["valid_accuracies"][FLAGS.algorithms[0]]:
+        step = len(results["valid_accuracies"][FLAGS.algorithms[0]]) * FLAGS.eval_every
+        next_eval = step + FLAGS.eval_every
+        logging.info("Resuming training from step %d", step)
 
     optimizer = optim.Adam(model.parameters(), lr=FLAGS.learning_rate)
 
