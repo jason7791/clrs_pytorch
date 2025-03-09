@@ -124,9 +124,6 @@ def main():
         use_triplets=args.use_triplets
     ).to(device)
 
-    # Load model from checkpoint if available
-    load_model(model, args.checkpoint_path)
-
     # Set up optimizer and loss function
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001)
     criterion = nn.BCEWithLogitsLoss()
