@@ -101,12 +101,11 @@ class ProbeError(Exception):
 
 def initialize(spec: specs.Spec) -> ProbesDict:
   """Initializes an empty `ProbesDict` corresponding with the provided spec."""
-  probes = dict()
+  probes = {}
   for stage in [_Stage.INPUT, _Stage.OUTPUT, _Stage.HINT]:
     probes[stage] = {}
     for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
       probes[stage][loc] = {}
-
   for name in spec:
     stage, loc, t = spec[name]
     probes[stage][loc][name] = {}
@@ -121,33 +120,29 @@ def push(probes: ProbesDict, stage: str, next_probe):
     for name in probes[stage][loc]:
       if name not in next_probe:
         raise ProbeError(f'Missing probe for {name}.')
-      if isinstance(probes[stage][loc][name]['data'], _Array):
+      if isinstance(probes[stage][loc][name]['data'], torch.Tensor):
         raise ProbeError('Attempting to push to finalized `ProbesDict`.')
       probes[stage][loc][name]['data'].append(next_probe[name])
 
 
 def finalize(probes: ProbesDict):
   """Finalizes a `ProbesDict` by stacking/squeezing the `data` field."""
-  device =torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+  device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
   for stage in [_Stage.INPUT, _Stage.OUTPUT, _Stage.HINT]:
     for loc in [_Location.NODE, _Location.EDGE, _Location.GRAPH]:
       for name in probes[stage][loc]:
-        # Check if data has already been finalized.
+        # Check if already finalized.
         if isinstance(probes[stage][loc][name]['data'], torch.Tensor):
           raise ProbeError('Attempting to re-finalize a finalized `ProbesDict`.')
-        # Ensure all elements are torch.Tensors.
-        data_list = [
-            x if isinstance(x, torch.Tensor) else torch.as_tensor(x, device=device)
-            for x in probes[stage][loc][name]['data']
-        ]
+        data_list = []
+        for x in probes[stage][loc][name]['data']:
+          if not isinstance(x, torch.Tensor):
+            x = torch.as_tensor(x, device=device)
+          data_list.append(x)
         if stage == _Stage.HINT:
-          # Hints are provided for each timestep. Stack them here.
           probes[stage][loc][name]['data'] = torch.stack(data_list)
         else:
-          # For inputs/outputs, stack then remove the leading axis.
           probes[stage][loc][name]['data'] = torch.squeeze(torch.stack(data_list))
-
-
 
 
 def split_stages(
@@ -158,10 +153,8 @@ def split_stages(
   inputs = []
   outputs = []
   hints = []
-
   for name in spec:
     stage, loc, t = spec[name]
-
     if stage not in probes:
       raise ProbeError(f'Missing stage {stage}.')
     if loc not in probes[stage]:
@@ -174,33 +167,30 @@ def split_stages(
       raise ProbeError(f'Probe {name} missing attribute `data`.')
     if t != probes[stage][loc][name]['type_']:
       raise ProbeError(f'Probe {name} of incorrect type {t}.')
-
     data = probes[stage][loc][name]['data']
-    if not isinstance(data, _Array):
-      raise ProbeError(f'Invalid `data` for probe "{name}". Did you forget to call `probing.finalize`?')
-
+    if not isinstance(data, torch.Tensor):
+      raise ProbeError(f'Invalid `data` for probe "{name}". Did you forget to call `finalize`?')
     if t in [_Type.MASK, _Type.MASK_ONE, _Type.CATEGORICAL]:
       if not (((data == 0) | (data == 1) | (data == -1)).all()):
         raise ProbeError(f'0|1|-1 `data` for probe "{name}"')
       if t in [_Type.MASK_ONE, _Type.CATEGORICAL] and not torch.all(torch.sum(torch.abs(data), -1) == 1):
         raise ProbeError(f'Expected one-hot `data` for probe "{name}"')
-
     dim_to_expand = 1 if stage == _Stage.HINT else 0
     data_point = DataPoint(name=name, location=loc, type_=t,
                            data=data.unsqueeze(dim_to_expand))
-
     if stage == _Stage.INPUT:
       inputs.append(data_point)
     elif stage == _Stage.OUTPUT:
       outputs.append(data_point)
     else:
       hints.append(data_point)
-
   return inputs, outputs, hints
 
 
 def array(A_pos: torch.tensor) -> torch.tensor:
   """Constructs an `array` probe."""
+  if not isinstance(A_pos, torch.Tensor):
+    A_pos = torch.as_tensor(A_pos)
   probe = torch.arange(A_pos.shape[0], device=A_pos.device)
   for i in range(1, A_pos.shape[0]):
     probe[A_pos[i].item()] = A_pos[i - 1]
@@ -209,6 +199,8 @@ def array(A_pos: torch.tensor) -> torch.tensor:
 
 def array_cat(A: torch.tensor, n: int) -> torch.tensor:
   """Constructs an `array_cat` probe."""
+  if not isinstance(A, torch.Tensor):
+    A = torch.as_tensor(A)
   assert n > 0
   probe = torch.zeros((A.shape[0], n), device=A.device)
   for i in range(A.shape[0]):
@@ -218,6 +210,8 @@ def array_cat(A: torch.tensor, n: int) -> torch.tensor:
 
 def heap(A_pos: torch.tensor, heap_size: int) -> torch.tensor:
   """Constructs a `heap` probe."""
+  if not isinstance(A_pos, torch.Tensor):
+    A_pos = torch.as_tensor(A_pos)
   assert heap_size > 0
   probe = torch.arange(A_pos.shape[0], device=A_pos.device)
   for i in range(1, heap_size):
@@ -227,6 +221,8 @@ def heap(A_pos: torch.tensor, heap_size: int) -> torch.tensor:
 
 def graph(A: torch.tensor) -> torch.tensor:
   """Constructs a `graph` probe."""
+  if not isinstance(A, torch.Tensor):
+    A = torch.as_tensor(A)
   probe = (A != 0).float()
   probe = ((A + torch.eye(A.shape[0], device=A.device)) != 0).float()
   return probe
@@ -242,10 +238,12 @@ def mask_one(i: int, n: int,
     return probe
 
 
-
 def strings_id(T_pos: torch.tensor, P_pos: torch.tensor) -> torch.tensor:
   """Constructs a `strings_id` probe."""
-  # Assuming T_pos and P_pos are on the same device.
+  if not isinstance(T_pos, torch.Tensor):
+    T_pos = torch.as_tensor(T_pos)
+  if not isinstance(P_pos, torch.Tensor):
+    P_pos = torch.as_tensor(P_pos)
   device = T_pos.device
   probe_T = torch.zeros(T_pos.shape[0], device=device)
   probe_P = torch.ones(P_pos.shape[0], device=device)
@@ -254,6 +252,8 @@ def strings_id(T_pos: torch.tensor, P_pos: torch.tensor) -> torch.tensor:
 
 def strings_pair(pair_probe: torch.tensor) -> torch.tensor:
   """Constructs a `strings_pair` probe."""
+  if not isinstance(pair_probe, torch.Tensor):
+    pair_probe = torch.as_tensor(pair_probe)
   n = pair_probe.shape[0]
   m = pair_probe.shape[1]
   probe_ret = torch.zeros((n + m, n + m), dtype=pair_probe.dtype, device=pair_probe.device)
@@ -265,17 +265,15 @@ def strings_pair(pair_probe: torch.tensor) -> torch.tensor:
 
 def strings_pair_cat(pair_probe: torch.tensor, nb_classes: int) -> torch.tensor:
   """Constructs a `strings_pair_cat` probe."""
+  if not isinstance(pair_probe, torch.Tensor):
+    pair_probe = torch.as_tensor(pair_probe)
   assert nb_classes > 0
   n = pair_probe.shape[0]
   m = pair_probe.shape[1]
-
-  # Add an extra class for 'this cell left blank.'
   probe_ret = torch.zeros((n + m, n + m, nb_classes + 1), device=pair_probe.device)
   for i in range(n):
     for j in range(m):
       probe_ret[i, j + n, int(pair_probe[i, j].item())] = _OutputClass.POSITIVE
-
-  # Fill the blank cells.
   for i_1 in range(n):
     for i_2 in range(n):
       probe_ret[i_1, i_2, nb_classes] = _OutputClass.MASKED
@@ -287,6 +285,12 @@ def strings_pair_cat(pair_probe: torch.tensor, nb_classes: int) -> torch.tensor:
 
 def strings_pi(T_pos: torch.tensor, P_pos: torch.tensor, pi: torch.tensor) -> torch.tensor:
   """Constructs a `strings_pi` probe."""
+  if not isinstance(T_pos, torch.Tensor):
+    T_pos = torch.as_tensor(T_pos)
+  if not isinstance(P_pos, torch.Tensor):
+    P_pos = torch.as_tensor(P_pos)
+  if not isinstance(pi, torch.Tensor):
+    pi = torch.as_tensor(pi)
   total = T_pos.shape[0] + P_pos.shape[0]
   probe = torch.arange(total, device=T_pos.device)
   for j in range(P_pos.shape[0]):
@@ -297,6 +301,10 @@ def strings_pi(T_pos: torch.tensor, P_pos: torch.tensor, pi: torch.tensor) -> to
 
 def strings_pos(T_pos: torch.tensor, P_pos: torch.tensor) -> torch.tensor:
   """Constructs a `strings_pos` probe."""
+  if not isinstance(T_pos, torch.Tensor):
+    T_pos = torch.as_tensor(T_pos)
+  if not isinstance(P_pos, torch.Tensor):
+    P_pos = torch.as_tensor(P_pos)
   probe_T = T_pos.clone().float() / T_pos.shape[0]
   probe_P = P_pos.clone().float() / P_pos.shape[0]
   return torch.cat([probe_T, probe_P])
@@ -304,6 +312,10 @@ def strings_pos(T_pos: torch.tensor, P_pos: torch.tensor) -> torch.tensor:
 
 def strings_pred(T_pos: torch.tensor, P_pos: torch.tensor) -> torch.tensor:
   """Constructs a `strings_pred` probe."""
+  if not isinstance(T_pos, torch.Tensor):
+    T_pos = torch.as_tensor(T_pos)
+  if not isinstance(P_pos, torch.Tensor):
+    P_pos = torch.as_tensor(P_pos)
   total = T_pos.shape[0] + P_pos.shape[0]
   probe = torch.arange(total, device=T_pos.device)
   for i in range(1, T_pos.shape[0]):
@@ -315,6 +327,8 @@ def strings_pred(T_pos: torch.tensor, P_pos: torch.tensor) -> torch.tensor:
 
 def predecessor_pointers_to_permutation_matrix(pointers: torch.tensor) -> torch.tensor:
   """Converts predecessor pointers to a permutation matrix."""
+  if not isinstance(pointers, torch.Tensor):
+    pointers = torch.as_tensor(pointers)
   nb_nodes = pointers.shape[-1]
   pointers_one_hot = torch.nn.functional.one_hot(pointers, nb_nodes)
   last = pointers_one_hot.sum(-2).argmin()
@@ -330,6 +344,8 @@ def predecessor_pointers_to_permutation_matrix(pointers: torch.tensor) -> torch.
 
 def permutation_matrix_to_predecessor_pointers(perm: torch.tensor) -> torch.tensor:
   """Converts a permutation matrix to predecessor pointers."""
+  if not isinstance(perm, torch.Tensor):
+    perm = torch.as_tensor(perm)
   nb_nodes = perm.shape[-1]
   pointers = torch.zeros(nb_nodes, dtype=torch.int64, device=perm.device)
   idx = perm.argmax(-1)
@@ -343,7 +359,8 @@ def permutation_matrix_to_predecessor_pointers(perm: torch.tensor) -> torch.tens
 def predecessor_to_cyclic_predecessor_and_first(
     pointers: torch.tensor) -> Tuple[torch.tensor, torch.tensor]:
   """Converts predecessor pointers to cyclic predecessor + first node mask."""
-  # Instead of torch.tensor(...), use .to(...) to preserve device.
+  if not isinstance(pointers, torch.Tensor):
+    pointers = torch.as_tensor(pointers)
   pointers = pointers.to(dtype=torch.long)
   nb_nodes = pointers.shape[-1]
   pointers_one_hot = torch.nn.functional.one_hot(pointers, nb_nodes)

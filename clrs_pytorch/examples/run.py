@@ -569,8 +569,8 @@ def main(unused_argv):
         feedback_list = [next(t) for t in train_samplers]
 
         # Perform training step for each algorithm.
+        model.train()
         for algo_idx, feedback in enumerate(feedback_list):
-            model.train()
             cur_loss = train(model, optimizer, feedback, algo_idx,
                              FLAGS.grad_clip_max_norm, device)
             current_train_items[algo_idx] += len(feedback.features.lengths)
