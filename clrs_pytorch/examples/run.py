@@ -37,7 +37,7 @@ _Feedback = samplers.Feedback
 _Location = specs.Location
 
 # -------------------------- Flag Definitions --------------------------
-flags.DEFINE_list('algorithms', ['graham_scan'], 'Algorithms to run.')
+flags.DEFINE_list('algorithms', ['bubble_sort'], 'Algorithms to run.')
 flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
                   'Training sizes to use. A size of -1 means use the benchmark dataset.')
 flags.DEFINE_integer('length_needle', -8,
@@ -363,11 +363,9 @@ def get_nb_nodes(feedback: _Feedback, is_chunked: bool) -> int:
 def move_feedback_to_device(feedback, device):
     """Move all tensor-like data in feedback to the specified device."""
     def move_to_device(data):
-        if isinstance(data, np.ndarray):
-            return torch.tensor(data, device=device, dtype=torch.float32)
-        elif isinstance(data, torch.Tensor):
-            return data.to(device)
-        return data
+        if not isinstance(data, torch.Tensor):
+            return torch.tensor(np.array(data), device=device, dtype=torch.float32)
+        return data.to(device)
 
     for dp_list in [feedback.features.inputs, feedback.features.hints, feedback.outputs]:
         for dp in dp_list:

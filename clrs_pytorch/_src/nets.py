@@ -143,7 +143,7 @@ class Net(torch.nn.Module):
       else:
         force_mask = None
       for hint in hints:
-        hint_data = torch.tensor(hint.data, dtype=torch.long, device=self.device)[i]
+        hint_data = hint.data.clone().detach().long().to(self.device)[i]
         _, loc, typ = spec[hint.name]
         if needs_noise:
           if (typ == _Type.POINTER and

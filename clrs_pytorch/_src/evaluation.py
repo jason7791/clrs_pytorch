@@ -21,7 +21,7 @@ from clrs_pytorch._src import probing
 from clrs_pytorch._src import specs
 import torch
 
-_Array = chex.Array
+_Array = torch.Tensor
 Result = Dict[str, probing.DataPoint]
 
 
@@ -39,6 +39,16 @@ def fuse_perm_and_mask(perm: probing.DataPoint,
   Returns:
     A node pointer with shape [..., N].
   """
+    # Ensure the data in both DataPoints are torch tensors.
+  device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+  if not isinstance(perm.data, torch.Tensor):
+      perm_data = torch.as_tensor(perm.data, device=device)
+  else:
+      perm_data = perm.data.to(device=device)
+  if not isinstance(mask.data, torch.Tensor):
+      mask_data = torch.as_tensor(mask.data, device=device)
+  else:
+      mask_data = mask.data.to(device=device)
   assert perm.type_ == specs.Type.PERMUTATION_POINTER
   assert perm.location == specs.Location.NODE
   assert mask.name == perm.name + '_mask'
@@ -46,9 +56,9 @@ def fuse_perm_and_mask(perm: probing.DataPoint,
   assert mask.location == specs.Location.NODE
   assert perm.data.shape[-1] == perm.data.shape[-2]
   assert perm.data.shape[:-1] == mask.data.shape
-  data = torch.where(mask.data > 0.5,
-                  torch.arange(perm.data.shape[-1]),  # self-pointers
-                  torch.argmax(perm.data, axis=-1))   # original pointers
+  data = torch.where(mask_data > 0.5,
+                  torch.arange(perm_data.shape[-1]),  # self-pointers
+                  torch.argmax(perm_data, axis=-1))   # original pointers
   return probing.DataPoint(name=perm.name,
                            type_=specs.Type.POINTER,
                            location=perm.location,

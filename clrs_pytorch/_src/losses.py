@@ -22,7 +22,7 @@ from clrs_pytorch._src.nets import _is_not_done_broadcast
 import numpy as np
 import torch
 
-_Array = chex.Array
+_Array = torch.Tensor
 _DataPoint = probing.DataPoint
 _OutputClass = specs.OutputClass
 _Type = specs.Type
@@ -32,10 +32,12 @@ EPS = 1e-12
 
 def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int, device) -> float:
   """Output loss for full-sample training."""
-  if isinstance(truth.data, np.ndarray):
-      truth_data = torch.tensor(truth.data,dtype=torch.float32, device=device)
-  else:
-      truth_data = truth.data.detach().to(device)
+  def convert_to_tensor(x, device, dtype=torch.float32):
+      if not isinstance(x, torch.Tensor):
+          return torch.tensor(np.array(x), device=device, dtype=torch.float32)
+      return x.to(device)
+
+  truth_data = convert_to_tensor(truth.data, device=device, dtype=torch.float32)
 
   if truth.type_ == _Type.SCALAR:
     total_loss = torch.mean((pred - truth_data)**2)
@@ -99,7 +101,7 @@ def _hint_loss(
 ) -> Tuple[_Array, _Array]:
   """Hint loss helper."""
 
-  truth_data = torch.tensor(truth_data, device=device)
+  truth_data = truth_data.clone().detach().to(device)
 
   mask = None
   if truth_type == _Type.SCALAR:
@@ -111,16 +113,16 @@ def _hint_loss(
     mask = torch.tensor(truth_data != _OutputClass.MASKED, device=device).float()  # pytype: disable=attribute-error  # numpy-scalars
 
   elif truth_type == _Type.MASK_ONE:
-    loss = -torch.sum(truth_data * torch.nn.functional.log_softmax(pred), dim=-1,
+    loss = -torch.sum(truth_data * torch.nn.functional.log_softmax(pred, dim=-1), dim=-1,
                     keepdims=True)
 
   elif truth_type == _Type.CATEGORICAL:
-    loss = -torch.sum(truth_data * torch.nn.functional.log_softmax(pred), dim=-1)
+    loss = -torch.sum(truth_data * torch.nn.functional.log_softmax(pred, dim=-1), dim=-1)
     mask = torch.any(truth_data == _OutputClass.POSITIVE, dim=-1).float()
 
   elif truth_type == _Type.POINTER:
     loss = -torch.sum(
-        torch.nn.functional.one_hot(torch.tensor(truth_data).long(), nb_nodes) * torch.nn.functional.log_softmax(pred, dim = -1),
+        torch.nn.functional.one_hot(truth_data.clone().detach().long(), nb_nodes) * torch.nn.functional.log_softmax(pred, dim = -1),
         dim=-1)
 
   elif truth_type == _Type.PERMUTATION_POINTER:

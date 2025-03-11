@@ -33,7 +33,7 @@ _Type = specs.Type
 
 
 def log_sinkhorn(x: _Array, steps: int, temperature: float, zero_diagonal: bool,
-                 noise_rng_key: Optional[_Array]) -> _Array:
+                 noise_rng_key: Optional[torch.Generator]) -> _Array:
   """Sinkhorn operator in log space, to postprocess permutation pointer logits.
 
   Args:
@@ -51,11 +51,8 @@ def log_sinkhorn(x: _Array, steps: int, temperature: float, zero_diagonal: bool,
   assert x.ndim >= 2
   assert x.shape[-1] == x.shape[-2]
   if noise_rng_key is not None:
-    # Add standard Gumbel noise (see https://arxiv.org/abs/1802.08665)
-    # Generate uniform noise in PyTorch
-    noise = torch.rand(x.shape, generator=noise_rng_key, device=x.device)  # noise_rng_key acts as a random seed
-
-    # Apply the same log transformations as in the JAX code
+    # Add standard Gumbel noise.
+    noise = torch.rand(x.shape, generator=noise_rng_key, device=x.device)
     noise = -torch.log(-torch.log(noise + 1e-12) + 1e-12)
     x = x + noise
   x /= temperature
@@ -247,7 +244,6 @@ def decode_fts(
 
     return hint_preds, output_preds
 
-
 def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
                      adj_mat: _Array, inf_bias: bool, repred: bool) -> _Array:
   """Decodes node features."""
@@ -276,9 +272,10 @@ def _decode_node_fts(decoders, t: str, h_t: _Array, edge_fts: _Array,
             x=preds, steps=10, temperature=0.1,
             zero_diagonal=True, noise_rng_key=None)
       else:  # training, add Gumbel noise
+        gen = torch.Generator(device=preds.device)
         preds = log_sinkhorn(
             x=preds, steps=10, temperature=0.1,
-            zero_diagonal=True, noise_rng_key=hk.next_rng_key())
+            zero_diagonal=True, noise_rng_key=gen)
   else:
     raise ValueError("Invalid output type")
 
