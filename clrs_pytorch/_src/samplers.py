@@ -608,7 +608,7 @@ class MatcherSampler(Sampler):
     length_haystack = length - length_needle
     needle = self._random_string(length=length_needle, chars=chars)
     haystack = self._random_string(length=length_haystack, chars=chars)
-    embed_pos = self._rng.choice(length_haystack - length_needle)
+    embed_pos = self._rng.choice(length_haystack - length_needle + 1)
     haystack[embed_pos:embed_pos + length_needle] = needle
     return [haystack, needle]
 
