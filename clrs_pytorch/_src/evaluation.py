@@ -42,11 +42,11 @@ def fuse_perm_and_mask(perm: probing.DataPoint,
     # Ensure the data in both DataPoints are torch tensors.
   device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
   if not isinstance(perm.data, torch.Tensor):
-      perm_data = torch.as_tensor(perm.data, device=device)
+      perm_data = torch.tensor(perm.data, device=device)
   else:
       perm_data = perm.data.to(device=device)
   if not isinstance(mask.data, torch.Tensor):
-      mask_data = torch.as_tensor(mask.data, device=device)
+      mask_data = torch.tensor(mask.data, device=device)
   else:
       mask_data = mask.data.to(device=device)
   assert perm.type_ == specs.Type.PERMUTATION_POINTER
