@@ -37,7 +37,7 @@ _Feedback = samplers.Feedback
 _Location = specs.Location
 
 # -------------------------- Flag Definitions --------------------------
-flags.DEFINE_list('algorithms', ['bellman_ford','bubble_sort'], 'Algorithms to run.')
+flags.DEFINE_list('algorithms', ['floyd_warshall','bubble_sort'], 'Algorithms to run.')
 flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
                   'Training sizes to use. A size of -1 means use the benchmark dataset.')
 flags.DEFINE_integer('length_needle', -8,

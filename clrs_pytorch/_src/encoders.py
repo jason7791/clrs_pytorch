@@ -53,13 +53,13 @@ def construct_encoders(stage: str, loc: str, t: str, hidden_dim: int, init: str,
     def create_linear():
         linear = nn.LazyLinear(hidden_dim)
         linear.hidden_dim = hidden_dim 
-        if init == 'xavier_on_scalars' and stage == "HINT" and t == "SCALAR":
+        if init == 'xavier_on_scalars' and stage == _Stage.HINT and t == _Type.SCALAR:
             linear.apply_xavier = True  # Mark for later Xavier initialization
         return linear
 
     # Create encoders
     encoders.append(create_linear())
-    if loc == "EDGE" and t == "POINTER":
+    if loc == _Location.EDGE and t == _Type.POINTER:
         encoders.append(create_linear())
 
     return encoders

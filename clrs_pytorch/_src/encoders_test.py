@@ -2,16 +2,23 @@ import unittest
 import torch
 import math
 from clrs_pytorch._src.encoders import construct_encoders, _encode_inputs, initialise_encoder_on_first_pass
-import torch.nn as nn
-from clrs_pytorch._src.probing import DataPoint
-from clrs_pytorch._src.specs import Location, Type
+from clrs_pytorch._src import probing
+from clrs_pytorch._src import specs
+
+_Array = torch.Tensor
+_DataPoint = probing.DataPoint
+_Location = specs.Location
+_Spec = specs.Spec
+_Stage = specs.Stage
+_Type = specs.Type
+
 
 class TestEncoderInitialization(unittest.TestCase):
     def setUp(self):
         self.hidden_dim = 64
-        self.stage = "HINT"
-        self.loc = "NODE"
-        self.t = "SCALAR"
+        self.stage = _Stage.HINT
+        self.loc = _Location.NODE
+        self.t = _Type.SCALAR
         self.name = "test_encoder"
         self.xavier_encoders = construct_encoders(self.stage, self.loc, self.t, self.hidden_dim, "xavier_on_scalars", self.name)
         self.default_encoders = construct_encoders(self.stage, self.loc, self.t, self.hidden_dim, "default", self.name)
@@ -19,7 +26,7 @@ class TestEncoderInitialization(unittest.TestCase):
     def test_xavier_encoder_initialization(self):
         """Test that LazyLinear is initialized properly on first pass for Xavier initialization."""
         input_data = torch.randn(3, 128)  # Dynamic input size
-        dp = DataPoint(name="test_dp", location=Location.NODE, type_=Type.SCALAR, data=input_data)
+        dp = _DataPoint(name="test_dp", location=_Location.NODE, type_=_Type.SCALAR, data=input_data)
         encoder = initialise_encoder_on_first_pass(self.xavier_encoders[0], dp.data)
         
         # Ensure weights are initialized
@@ -33,7 +40,7 @@ class TestEncoderInitialization(unittest.TestCase):
     def test_default_encoder_initialization(self):
         """Test that LazyLinear initializes properly without Xavier initialization."""
         input_data = torch.randn(3, 128)  # Dynamic input size
-        dp = DataPoint(name="test_dp", location=Location.NODE, type_=Type.SCALAR, data=input_data)
+        dp = _DataPoint(name="test_dp", location=_Location.NODE, type_=_Type.SCALAR, data=input_data)
         encoder = initialise_encoder_on_first_pass(self.default_encoders[0], dp.data)
         
         # Ensure weights are initialized
@@ -46,7 +53,7 @@ class TestEncoderInitialization(unittest.TestCase):
     def test_encode_inputs(self):
         """Test that _encode_inputs processes data correctly after initialization."""
         input_data = torch.randn(3, 128)
-        dp = DataPoint(name="test_dp", location=Location.NODE, type_=Type.SCALAR, data=input_data)
+        dp = _DataPoint(name="test_dp", location=_Location.NODE, type_=_Type.SCALAR, data=input_data)
         output = _encode_inputs(self.xavier_encoders, dp)
         print(output.shape)
         # Check output shape
@@ -56,7 +63,7 @@ class TestEncoderInitialization(unittest.TestCase):
     def test_no_reinitialization_on_second_pass(self):
         """Test that weights are not reinitialized on second pass."""
         input_data = torch.randn(3, 128)
-        dp = DataPoint(name="test_dp", location=Location.NODE, type_=Type.SCALAR, data=input_data)
+        dp = _DataPoint(name="test_dp", location=_Location.NODE, type_=_Type.SCALAR, data=input_data)
         
         # First pass - initialize encoder
         encoder = initialise_encoder_on_first_pass(self.xavier_encoders[0], dp.data)
