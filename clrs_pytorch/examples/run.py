@@ -37,7 +37,7 @@ _Feedback = samplers.Feedback
 _Location = specs.Location
 
 # -------------------------- Flag Definitions --------------------------
-flags.DEFINE_list('algorithms', ['bubble_sort'], 'Algorithms to run.')
+flags.DEFINE_list('algorithms', ['bellman_ford','bubble_sort'], 'Algorithms to run.')
 flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
                   'Training sizes to use. A size of -1 means use the benchmark dataset.')
 flags.DEFINE_integer('length_needle', -8,
@@ -53,7 +53,7 @@ flags.DEFINE_integer('batch_size', 32, 'Batch size for training.')
 flags.DEFINE_boolean('chunked_training', False, 'Use chunking for training.')
 flags.DEFINE_integer('chunk_length', 16, 'Time chunk length for training (if chunked_training is True).')
 flags.DEFINE_integer('train_steps', 500, 'Number of training iterations.')
-flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
+flags.DEFINE_integer('eval_every', 10, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Testing frequency (in steps).')
 
 flags.DEFINE_integer('hidden_size', 128, 'Number of hidden units in the model.')
