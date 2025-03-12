@@ -93,6 +93,7 @@ flags.DEFINE_string('performance_path', '/Users/jasonwjh/Documents/clrs_pytorch/
 flags.DEFINE_string('dataset_path', '/tmp/CLRS30', 'Path where the dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False, 'Freeze the processor of the model.')
 flags.DEFINE_boolean('resume', False, 'Resume training from the last saved checkpoint if available.')
+flags.DEFINE_integer('test_lengths', -1, 'Test lengths. Defaults to -1, where we use test datasets. Else we use max of train lengths')
 
 FLAGS = flags.FLAGS
 
@@ -320,7 +321,7 @@ def create_samplers(rng: Any,
 
             mult = clrs_pytorch.CLRS_30_ALGS_SETTINGS[algorithm]['num_samples_multiplier']
             val_args = dict(
-                sizes=val_lengths or [np.amax(train_lengths)],
+                sizes=val_lengths,
                 split='val',
                 batch_size=val_batch_size,
                 multiplier=2 * mult,
@@ -332,7 +333,7 @@ def create_samplers(rng: Any,
             val_sampler, val_samples, spec = make_multi_sampler(**val_args)
 
             test_args = dict(
-                sizes=test_lengths or [-1],
+                sizes=test_lengths,
                 split='test',
                 batch_size=test_batch_size,
                 multiplier=2 * mult,
@@ -497,7 +498,7 @@ def main(unused_argv):
         train_lengths=train_lengths,
         algorithms=FLAGS.algorithms,
         val_lengths=[np.amax(train_lengths)],
-        test_lengths=[2 * np.amax(train_lengths)],
+        test_lengths=[-1] if FLAGS.test_lengths == -1 else [np.amax(train_lengths)],
         train_batch_size=FLAGS.batch_size,
         device=device
     )
