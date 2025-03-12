@@ -44,34 +44,52 @@ class CustomLazyLinear(nn.LazyLinear):
         # Apply custom initialization if provided
         if hasattr(self, "initialiser") and self.initialiser:
             self.initialiser(self.weight)
-
-
-def construct_encoders(stage: str, loc: str, t: str,
-                       hidden_dim: int, init: str, name: str):
-    """Constructs encoders in PyTorch."""
+  
+def construct_encoders(stage: str, loc: str, t: str, hidden_dim: int, init: str, name: str):
+    """Constructs encoders in PyTorch using LazyLinear with dynamic initialization."""
     
-    # Define initializer
-    def truncated_normal_(tensor, stddev):
-        with torch.no_grad():
-            # Fill with values from a normal distribution
-            tensor.normal_(mean=0.0, std=stddev)
-            # Truncate values within 2 standard deviations
-            tensor.clamp_(-2 * stddev, 2 * stddev)
+    encoders = nn.ModuleList([])
 
-    if init == 'xavier_on_scalars' and stage == _Stage.HINT and t == _Type.SCALAR:
-        stddev = 1.0 / math.sqrt(hidden_dim)
-        initialiser = lambda tensor: truncated_normal_(tensor, stddev)
-    elif init in ['default', 'xavier_on_scalars']:
-        initialiser = None
-    else:
-        raise ValueError(f'Encoder initializer {init} not supported.')
+    def create_linear():
+        linear = nn.LazyLinear(hidden_dim)
+        linear.hidden_dim = hidden_dim 
+        if init == 'xavier_on_scalars' and stage == "HINT" and t == "SCALAR":
+            linear.apply_xavier = True  # Mark for later Xavier initialization
+        return linear
 
+    # Create encoders
+    encoders.append(create_linear())
+    if loc == "EDGE" and t == "POINTER":
+        encoders.append(create_linear())
 
-    encoders = nn.ModuleList([CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser)])
-    if loc == _Location.EDGE and t == _Type.POINTER:
-        # Edge pointers need two-way encoders
-        encoders.append(CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser))
     return encoders
+
+# def construct_encoders(stage: str, loc: str, t: str,
+#                        hidden_dim: int, init: str, name: str):
+#     """Constructs encoders in PyTorch."""
+    
+#     # Define initializer
+#     def truncated_normal_(tensor, stddev):
+#         with torch.no_grad():
+#             # Fill with values from a normal distribution
+#             tensor.normal_(mean=0.0, std=stddev)
+#             # Truncate values within 2 standard deviations
+#             tensor.clamp_(-2 * stddev, 2 * stddev)
+
+#     if init == 'xavier_on_scalars' and stage == _Stage.HINT and t == _Type.SCALAR:
+#         stddev = 1.0 / math.sqrt(hidden_dim)
+#         initialiser = lambda tensor: truncated_normal_(tensor, stddev)
+#     elif init in ['default', 'xavier_on_scalars']:
+#         initialiser = None
+#     else:
+#         raise ValueError(f'Encoder initializer {init} not supported.')
+
+
+#     encoders = nn.ModuleList([CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser)])
+#     if loc == _Location.EDGE and t == _Type.POINTER:
+#         # Edge pointers need two-way encoders
+#         encoders.append(CustomLazyLinear(out_features=hidden_dim, initialiser=initialiser))
+#     return encoders
 
 def preprocess(dp: _DataPoint, nb_nodes: int) -> _DataPoint:
     """Pre-process data point.
@@ -133,7 +151,9 @@ def accum_edge_fts(encoders, dp: _DataPoint, edge_fts: _Array) -> _Array:
     encoding = _encode_inputs(encoders, dp)
     if dp.type_ == _Type.POINTER:
       # Aggregate pointer contributions across sender and receiver nodes.
-      encoding_2 = encoders[1](dp.data.unsqueeze(-1))
+      dp_data = dp.data.unsqueeze(-1)
+      encoder = initialise_encoder_on_first_pass(encoders[1], dp_data)
+      encoding_2 = encoder(dp_data)
       edge_fts += torch.mean(encoding, dim=1) + torch.mean(encoding_2, dim=2)
     else:
       edge_fts += encoding
@@ -162,9 +182,32 @@ def accum_graph_fts(encoders, dp: _DataPoint,
   return graph_fts
 
 
+# def _encode_inputs(encoders, dp: _DataPoint) -> _Array:
+#   if dp.type_ == _Type.CATEGORICAL:
+#     encoding = encoders[0](dp.data)
+#   else:
+#     encoding = encoders[0](torch.unsqueeze(dp.data, -1))
+#   return encoding
+def initialise_encoder_on_first_pass(encoder, dp_data):
+    if not hasattr(encoder, "initialized"):
+        input_shape = dp_data.shape
+        dummy_input = torch.randn(*input_shape).to(dp_data.device)  # Dummy input of same shape
+        encoder(dummy_input)  # First forward pass to initialize LazyLinear
+        encoder.initialized = True  # Mark as initialized
+
+        # Apply Xavier initialization if needed
+        if getattr(encoder, "apply_xavier", False):
+            torch.nn.init.normal_(encoder.weight, mean=0.0, std=1.0 / math.sqrt(encoder.hidden_dim))
+            if encoder.bias is not None:
+                torch.nn.init.zeros_(encoder.bias)
+    return encoder
+
 def _encode_inputs(encoders, dp: _DataPoint) -> _Array:
-  if dp.type_ == _Type.CATEGORICAL:
-    encoding = encoders[0](dp.data)
-  else:
-    encoding = encoders[0](torch.unsqueeze(dp.data, -1))
-  return encoding
+    """Encodes inputs, ensuring LazyLinear layers are initialized with a dummy pass."""
+    if dp.type_ == _Type.CATEGORICAL:
+        dp_data = dp.data
+    else:
+        dp_data = torch.unsqueeze(dp.data, -1)
+    encoder = initialise_encoder_on_first_pass(encoders[0],dp_data)
+    encoding = encoder(dp_data)
+    return encoding
