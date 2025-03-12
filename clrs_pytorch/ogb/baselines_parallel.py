@@ -189,7 +189,7 @@ class ParallelMPNNModel(nn.Module):
 
             # Concatenate outputs from both streams and reduce dimensionality.
             concatenated_output = torch.cat([random_output, pretrained_output], dim=-1)  # (B, N, 2F)
-            hidden = F.relu(self.reduction_layer[i](concatenated_output))  # (B, N, F)
+            hidden = self.reduction_layer[i](concatenated_output)  # (B, N, F)
 
         # Aggregate node representations via mean pooling to form graph embeddings.
         graph_emb = hidden.mean(dim=1)  # (B, F)
