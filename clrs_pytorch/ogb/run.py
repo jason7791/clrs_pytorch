@@ -92,6 +92,7 @@ def main():
     parser.add_argument("--use_triplets", action="store_true", help="Use triplet reasoning")
     parser.add_argument("--use_pretrain_weights", action="store_true", help="Use pre-trained weights")
     parser.add_argument("--pretrained_weights_path", type=str, default="checkpoints/pretrained.pth", help="Path to pre-trained weights")
+    parser.add_argument("--resume", action="store_true", help="Resume training from the last checkpoint and performance results")
     args = parser.parse_args()
 
     # Set up logging
@@ -105,7 +106,7 @@ def main():
     split_idx = dataset.get_idx_split()
     evaluator = Evaluator(name=args.dataset)
     
-    # Select the appropriate metric key for logging and evaluation
+    # Select the appropriate metric key for logging and evaluation.
     # ogbg-molhiv uses ROC-AUC while ogbg-molpcba uses Average Precision (AP)
     metric_key = "rocauc" if args.dataset == "ogbg-molhiv" else "ap"
     
@@ -135,47 +136,83 @@ def main():
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.001)
     criterion = nn.BCEWithLogitsLoss()
 
-    # Track best validation performance for early stopping
+    # Initialize performance metrics and resume variables.
+    results = {
+        "train_accuracies": [],
+        "valid_accuracies": [],
+        "test_accuracies": []
+    }
+    start_epoch = 0
     best_valid_perf = float("-inf")
     early_stop_counter = 0
-    train_acc_list, valid_acc_list, test_acc_list = [], [], []
 
-    # Training loop
-    for epoch in range(1, args.epochs + 1):
+    # Resume logic: load previous results and checkpoint if the resume flag is set.
+    if args.resume:
+        if os.path.exists(args.performance_path):
+            try:
+                with open(args.performance_path, 'r') as f:
+                    results = json.load(f)
+                start_epoch = len(results["train_accuracies"])
+                if results["valid_accuracies"]:
+                    best_valid_perf = max(results["valid_accuracies"])
+                    best_epoch = results["valid_accuracies"].index(best_valid_perf) + 1
+                    early_stop_counter = start_epoch - best_epoch
+                logging.info(f"Resuming training from epoch {start_epoch+1} with best valid {metric_key.upper()}: {best_valid_perf:.4f} and early_stop_counter: {early_stop_counter}")
+                # Load model checkpoint
+                load_model(model, args.checkpoint_path)
+            except Exception as e:
+                logging.error(f"Failed to load previous results: {str(e)}")
+        else:
+            logging.info("No previous performance results found. Starting fresh training.")
+
+    train_acc_list = results["train_accuracies"]
+    valid_acc_list = results["valid_accuracies"]
+    test_acc_list = results["test_accuracies"]
+
+    # Training loop with early stopping, starting from the next epoch.
+    for epoch in range(start_epoch + 1, args.epochs + 1):
         logging.info(f"Epoch {epoch} / {args.epochs}")
         
-        # Train and evaluate
+        # Train and evaluate.
         train(model, device, train_loader, optimizer, criterion)
         train_perf = evaluate(model, device, train_loader, evaluator)
         valid_perf = evaluate(model, device, valid_loader, evaluator)
         
         logging.info(f"Train {metric_key.upper()}: {train_perf[metric_key]:.4f}, Valid {metric_key.upper()}: {valid_perf[metric_key]:.4f}")
 
-        # Store performance metrics
+        # Store performance metrics.
         train_acc_list.append(train_perf[metric_key])
         valid_acc_list.append(valid_perf[metric_key])
 
-        # Save the model if validation performance improves
+        # Save the model if validation performance improves.
         if valid_perf[metric_key] > best_valid_perf:
             best_valid_perf = valid_perf[metric_key]
             torch.save(model.state_dict(), args.checkpoint_path)
             logging.info(f"New best model saved at epoch {epoch} with Valid {metric_key.upper()}: {best_valid_perf:.4f}")
-            early_stop_counter = 0  # Reset early stopping counter
+            early_stop_counter = 0  # Reset early stopping counter.
         else:
             early_stop_counter += 1
 
-        # Check early stopping condition
+        # Update and save performance metrics (including early_stop_counter and best_valid_perf).
+        results = {
+            "train_accuracies": train_acc_list,
+            "valid_accuracies": valid_acc_list,
+            "test_accuracies": test_acc_list
+        }
+        save_results(results, args.performance_path)
+
+        # Check early stopping condition.
         if early_stop_counter >= args.early_stop_patience:
             logging.info(f"Early stopping triggered at epoch {epoch}.")
             break
 
-    # Restore best model for final evaluation
+    # Restore best model for final evaluation.
     load_model(model, args.checkpoint_path)
     test_perf = evaluate(model, device, test_loader, evaluator)
     logging.info(f"Test {metric_key.upper()}: {test_perf[metric_key]:.4f}")
     test_acc_list.append(test_perf[metric_key])
 
-    # Save final results
+    # Save final results.
     results = {
         "train_accuracies": train_acc_list,
         "valid_accuracies": valid_acc_list,

@@ -95,6 +95,7 @@ def main():
     parser.add_argument("--use_triplets", action="store_true", help="Use triplet reasoning")
     parser.add_argument("--use_pretrain_weights", action="store_true", help="Use pre-trained weights")
     parser.add_argument("--pretrained_weights_path", type=str, default="checkpoints/pretrained.pth", help="Path to pre-trained weights")
+    parser.add_argument("--resume", action="store_true", help="Resume training from the last checkpoint and performance results")
     args = parser.parse_args()
 
     # Set up logging
@@ -108,7 +109,12 @@ def main():
     dataset = PygNodePropPredDataset(name=args.dataset, transform=T.ToSparseTensor())
     data = dataset[0]
     # Ensure the adjacency matrix is symmetric.
-    data.adj_t = data.adj_t.to_symmetric()
+    if hasattr(data.adj_t, 'to_symmetric'):
+        data.adj_t = data.adj_t.to_symmetric()
+    else:
+        # Manually symmetrize assuming a dense tensor representation.
+        data.adj_t = data.adj_t + data.adj_t.transpose(0, 1)
+
     data = data.to(device)
 
     # Get train/validation/test splits.
@@ -133,16 +139,40 @@ def main():
     evaluator = Evaluator(name=args.dataset)
     metric_key = "acc" if args.dataset == "ogbn-arxiv" else "ap"
 
+    # Initialize performance metrics and resume variables.
+    results = {"train_accuracies": [], "valid_accuracies": [], "test_accuracies": []}
+    start_epoch = 0
     best_valid_acc = 0.0
     early_stop_counter = 0
 
-    train_acc_list, valid_acc_list, test_acc_list = [], [], []
+    # Resume logic: load previous results and checkpoint if the resume flag is set.
+    if args.resume:
+        if os.path.exists(args.performance_path):
+            try:
+                with open(args.performance_path, 'r') as f:
+                    results = json.load(f)
+                start_epoch = len(results["train_accuracies"])
+                if results["valid_accuracies"]:
+                    best_valid_acc = max(results["valid_accuracies"])
+                    best_epoch = results["valid_accuracies"].index(best_valid_acc)+1
+                    early_stop_counter = start_epoch - best_epoch
+                logging.info(f"Resuming training from epoch {start_epoch+1} with best valid acc: {best_valid_acc:.4f}")
+                # Load model checkpoint
+                load_model(model, args.checkpoint_path)
+            except Exception as e:
+                logging.error(f"Failed to load previous results: {str(e)}")
+        else:
+            logging.info("No previous performance results found. Starting fresh training.")
 
-    # Training loop with early stopping.
-    for epoch in range(1, args.epochs + 1):
-        loss = train(model, data, split_idx['train'], optimizer, criterion)
+    train_acc_list = results["train_accuracies"]
+    valid_acc_list = results["valid_accuracies"]
+    test_acc_list = results["test_accuracies"]
+
+    # Training loop with early stopping, starting from the next epoch.
+    for epoch in range(start_epoch + 1, args.epochs + 1):
+        loss_val = train(model, data, split_idx['train'], optimizer, criterion)
         train_acc, valid_acc, _ = evaluate(model, data, split_idx, evaluator, metric_key)
-        logging.info(f"Epoch {epoch}/{args.epochs}, Loss: {loss:.4f}, Train Acc: {train_acc:.4f}, Valid Acc: {valid_acc:.4f}")
+        logging.info(f"Epoch {epoch}/{args.epochs}, Loss: {loss_val:.4f}, Train Acc: {train_acc:.4f}, Valid Acc: {valid_acc:.4f}")
 
         train_acc_list.append(train_acc)
         valid_acc_list.append(valid_acc)
@@ -156,6 +186,14 @@ def main():
         else:
             early_stop_counter += 1
 
+        # Save performance metrics at the end of this epoch.
+        results = {
+            "train_accuracies": train_acc_list,
+            "valid_accuracies": valid_acc_list,
+            "test_accuracies": test_acc_list
+        }
+        save_results(results, args.performance_path)
+
         # Check early stopping condition.
         if early_stop_counter >= args.early_stop_patience:
             logging.info(f"Early stopping triggered at epoch {epoch}.")
@@ -167,7 +205,7 @@ def main():
     logging.info(f"Final Test Accuracy: {best_test_acc:.4f}")
     test_acc_list.append(best_test_acc)
 
-    # Save all performance metrics.
+    # Save final performance metrics.
     results = {
         "train_accuracies": train_acc_list,
         "valid_accuracies": valid_acc_list,
