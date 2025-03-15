@@ -174,27 +174,18 @@ class BaselineModel(nn.Module):
 
         # Message Passing Layers
         for i, layer in enumerate(self.layers):
-            if self.use_triplets:
-                node_fts, triplet_msgs = layer(
-                    node_fts=node_fts_dense, 
-                    edge_fts=edge_fts_dense,
-                    graph_fts=graph_fts,
-                    adj_mat=adj_mat,
-                    hidden=hidden,
-                    triplet_msgs=triplet_msgs
-                )
-            else:
-                node_fts, _ = layer(
-                    node_fts=node_fts_dense, 
-                    edge_fts=edge_fts_dense,
-                    graph_fts=graph_fts,
-                    adj_mat=adj_mat,
-                    hidden=hidden,
-                )
-            hidden = node_fts  # Update hidden representation
+
+            hidden, triplet_msgs = layer(
+                node_fts=node_fts_dense, 
+                edge_fts=edge_fts_dense,
+                graph_fts=graph_fts,
+                adj_mat=adj_mat,
+                hidden=hidden,
+                triplet_msgs=triplet_msgs
+            )
 
         # Aggregate node features into graph-level embeddings
-        graph_emb = node_fts.mean(dim=1)  # B x F
+        graph_emb = hidden.mean(dim=1)  # B x F
 
         # Final prediction
         return self.graph_pred(graph_emb.to(device))  # B x out_dim

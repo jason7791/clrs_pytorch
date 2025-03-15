@@ -48,6 +48,8 @@ class ParallelMPNNModel(nn.Module):
         self.use_triplets = use_triplets
         self.layers = nn.ModuleList()
         self.reduction_layer = nn.ModuleList()
+        if self.use_triplets:
+            self.triplet_reduction_layers = nn.ModuleList()
 
         for i in range(num_layers):
             # Initialize two MPNN streams: random and pretrained.
@@ -88,6 +90,8 @@ class ParallelMPNNModel(nn.Module):
 
             # Linear layer to reduce concatenated output (2 * hidden_dim) to hidden_dim.
             self.reduction_layer.append(nn.Linear(2 * hidden_dim, hidden_dim))
+            if self.use_triplets:
+                self.triplet_reduction_layers.append(nn.Linear(2 * hidden_dim, hidden_dim))
 
         self.graph_pred = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
@@ -145,51 +149,37 @@ class ParallelMPNNModel(nn.Module):
         # Initialize graph features and hidden representations.
         graph_fts = torch.zeros((num_graphs, edge_feature_dim), device=device)  # (B, F)
         hidden = torch.zeros_like(node_fts_dense, device=device)  # (B, N, F)
-        current_edge_fts = edge_fts_dense
-
         triplet_msgs = None
 
-        # Process each layer.
         for i, layer_dict in enumerate(self.layers):
             random_mpnn = layer_dict['random']
             pretrained_mpnn = layer_dict['pretrained']
 
-            if self.use_triplets:
-                random_output, triplet_msgs = random_mpnn(
-                    node_fts=node_fts_dense,
-                    edge_fts=current_edge_fts,
-                    graph_fts=graph_fts,
-                    adj_mat=adj_mat,
-                    hidden=hidden,
-                    triplet_msgs=triplet_msgs
-                )
-                pretrained_output, triplet_msgs = pretrained_mpnn(
-                    node_fts=node_fts_dense,
-                    edge_fts=current_edge_fts,
-                    graph_fts=graph_fts,
-                    adj_mat=adj_mat,
-                    hidden=hidden,
-                    triplet_msgs=triplet_msgs
-                )
-            else:
-                random_output, _ = random_mpnn(
-                    node_fts=node_fts_dense,
-                    edge_fts=current_edge_fts,
-                    graph_fts=graph_fts,
-                    adj_mat=adj_mat,
-                    hidden=hidden
-                )
-                pretrained_output, _ = pretrained_mpnn(
-                    node_fts=node_fts_dense,
-                    edge_fts=current_edge_fts,
-                    graph_fts=graph_fts,
-                    adj_mat=adj_mat,
-                    hidden=hidden
-                )
-
-            # Concatenate outputs from both streams and reduce dimensionality.
-            concatenated_output = torch.cat([random_output, pretrained_output], dim=-1)  # (B, N, 2F)
-            hidden = self.reduction_layer[i](concatenated_output)  # (B, N, F)
+            # Process the two streams separately with triplet messages.
+            random_out, random_triplet = random_mpnn(
+                node_fts=node_fts_dense,
+                edge_fts=edge_fts_dense,
+                graph_fts=graph_fts,
+                adj_mat=adj_mat,
+                hidden=hidden,
+                triplet_msgs=triplet_msgs
+            )
+            pretrained_out, pretrained_triplet = pretrained_mpnn(
+                node_fts=node_fts_dense,
+                edge_fts=edge_fts_dense,
+                graph_fts=graph_fts,
+                adj_mat=adj_mat,
+                hidden=hidden,
+                triplet_msgs=triplet_msgs
+            )
+            # Concatenate the main outputs from both streams.
+            concatenated = torch.cat([random_out, pretrained_out], dim=-1)  # [1, N, 2*hidden_dim]
+            hidden = self.reduction_layers[i](concatenated)  # [1, N, hidden_dim]
+            
+            # Similarly, concatenate the triplet messages.
+            if(self.use_triplets):
+                concatenated_triplet = torch.cat([random_triplet, pretrained_triplet], dim=-1)  # [1, N, N, 2*hidden_dim]
+                triplet_msgs = self.triplet_reduction_layers[i](concatenated_triplet)  # [1, N, N, hidden_dim]
 
         # Aggregate node representations via mean pooling to form graph embeddings.
         graph_emb = hidden.mean(dim=1)  # (B, F)
