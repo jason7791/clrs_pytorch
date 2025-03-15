@@ -113,11 +113,11 @@ def main():
 
     # Get train/validation/test splits.
     split_idx = dataset.get_idx_split()
-
+    out_dim = dataset.num_tasks if hasattr(dataset, "num_tasks") else dataset.num_classes
     # Initialize the model.
     ModelClass = BaselineNodeModel if args.model == "serial" else ParallelNodeModel
     model = ModelClass(
-        out_dim=dataset.num_tasks,
+        out_dim=out_dim,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         use_pretrain_weights=args.use_pretrain_weights,
