@@ -31,7 +31,8 @@ def train(model, device, loader, optimizer, criterion):
         batch = batch.to(device)
         optimizer.zero_grad()
         pred = model(batch)
-        is_labeled = batch.y == batch.y  # Mask for valid labels
+        # Create a mask for valid labels
+        is_labeled = batch.y == batch.y  
         loss = criterion(pred[is_labeled], batch.y[is_labeled].float())
         loss.backward()
         optimizer.step()
@@ -75,7 +76,8 @@ def main():
     """Main function to train and evaluate the PGN model."""
     
     # Argument parser setup
-    parser = argparse.ArgumentParser(description="PGN on ogbg-molhiv")
+    parser = argparse.ArgumentParser(description="GNN on OGB datasets")
+    parser.add_argument("--dataset", type=str, choices=["ogbg-molhiv", "ogbg-molpcba"], default="ogbg-molhiv", help="Dataset name")
     parser.add_argument("--device", type=int, default=0, help="GPU device ID")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
@@ -98,10 +100,14 @@ def main():
     # Device configuration
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
     
-    # Load dataset and evaluator
-    dataset = PygGraphPropPredDataset(name="ogbg-molhiv")
+    # Load dataset and evaluator based on the dataset argument
+    dataset = PygGraphPropPredDataset(name=args.dataset)
     split_idx = dataset.get_idx_split()
-    evaluator = Evaluator(name="ogbg-molhiv")
+    evaluator = Evaluator(name=args.dataset)
+    
+    # Select the appropriate metric key for logging and evaluation
+    # ogbg-molhiv uses ROC-AUC while ogbg-molpcba uses Average Precision (AP)
+    metric_key = "rocauc" if args.dataset == "ogbg-molhiv" else "ap"
     
     # Set random seed
     set_seed(args.seed)
@@ -112,6 +118,7 @@ def main():
     test_loader = DataLoader(dataset[split_idx["test"]], batch_size=args.batch_size, shuffle=False)
 
     # Initialize model
+    # The output dimension is automatically set based on the dataset's number of tasks.
     ModelClass = BaselineModel if args.model == "serial" else ParallelMPNNModel
     model = ModelClass(
         out_dim=dataset.num_tasks,
@@ -142,22 +149,22 @@ def main():
         train_perf = evaluate(model, device, train_loader, evaluator)
         valid_perf = evaluate(model, device, valid_loader, evaluator)
         
-        logging.info(f"Train ROC-AUC: {train_perf['rocauc']:.4f}, Valid ROC-AUC: {valid_perf['rocauc']:.4f}")
+        logging.info(f"Train {metric_key.upper()}: {train_perf[metric_key]:.4f}, Valid {metric_key.upper()}: {valid_perf[metric_key]:.4f}")
 
         # Store performance metrics
-        train_acc_list.append(train_perf["rocauc"])
-        valid_acc_list.append(valid_perf["rocauc"])
+        train_acc_list.append(train_perf[metric_key])
+        valid_acc_list.append(valid_perf[metric_key])
 
         # Save the model if validation performance improves
-        if valid_perf["rocauc"] > best_valid_perf:
-            best_valid_perf = valid_perf["rocauc"]
+        if valid_perf[metric_key] > best_valid_perf:
+            best_valid_perf = valid_perf[metric_key]
             torch.save(model.state_dict(), args.checkpoint_path)
-            logging.info(f"New best model saved at epoch {epoch} with Valid ROC-AUC: {best_valid_perf:.4f}")
+            logging.info(f"New best model saved at epoch {epoch} with Valid {metric_key.upper()}: {best_valid_perf:.4f}")
             early_stop_counter = 0  # Reset early stopping counter
         else:
             early_stop_counter += 1
 
-        # Check early stopping
+        # Check early stopping condition
         if early_stop_counter >= args.early_stop_patience:
             logging.info(f"Early stopping triggered at epoch {epoch}.")
             break
@@ -165,8 +172,8 @@ def main():
     # Restore best model for final evaluation
     load_model(model, args.checkpoint_path)
     test_perf = evaluate(model, device, test_loader, evaluator)
-    logging.info(f"Test ROC-AUC: {test_perf['rocauc']:.4f}")
-    test_acc_list.append(test_perf["rocauc"])
+    logging.info(f"Test {metric_key.upper()}: {test_perf[metric_key]:.4f}")
+    test_acc_list.append(test_perf[metric_key])
 
     # Save final results
     results = {
