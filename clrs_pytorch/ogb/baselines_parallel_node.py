@@ -93,19 +93,6 @@ class ParallelNodeModel(nn.Module):
             nn.Linear(hidden_dim, out_dim)
         )
     
-    def reset_parameters(self):
-        """Reset parameters of all layers, reduction layers, and the prediction head."""
-        for layer_dict in self.layers:
-            for key in layer_dict:
-                if hasattr(layer_dict[key], "reset_parameters"):
-                    layer_dict[key].reset_parameters()
-        for red in self.reduction_layers:
-            red.reset_parameters()
-        if hasattr(self.node_projector, "reset_parameters"):
-            self.node_projector.reset_parameters()
-        for module in self.prediction_head:
-            if hasattr(module, "reset_parameters"):
-                module.reset_parameters()
     
     def forward(self, x, adj_t):
         """

@@ -47,7 +47,7 @@ class ParallelMPNNModel(nn.Module):
         self.use_pretrain_weights = use_pretrain_weights
         self.use_triplets = use_triplets
         self.layers = nn.ModuleList()
-        self.reduction_layer = nn.ModuleList()
+        self.reduction_layers = nn.ModuleList()
         if self.use_triplets:
             self.triplet_reduction_layers = nn.ModuleList()
 
@@ -89,7 +89,7 @@ class ParallelMPNNModel(nn.Module):
             }))
 
             # Linear layer to reduce concatenated output (2 * hidden_dim) to hidden_dim.
-            self.reduction_layer.append(nn.Linear(2 * hidden_dim, hidden_dim))
+            self.reduction_layers.append(nn.Linear(2 * hidden_dim, hidden_dim))
             if self.use_triplets:
                 self.triplet_reduction_layers.append(nn.Linear(2 * hidden_dim, hidden_dim))
 
