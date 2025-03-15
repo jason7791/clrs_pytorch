@@ -10,6 +10,7 @@ import torch.optim as optim
 from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
+from torch_geometric.data import Data
 
 from baselines import BaselineModel
 from baselines_parallel import ParallelMPNNModel
@@ -101,6 +102,7 @@ def main():
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
     
     # Load dataset and evaluator based on the dataset argument
+    torch.serialization.add_safe_globals([Data])
     dataset = PygGraphPropPredDataset(name=args.dataset)
     split_idx = dataset.get_idx_split()
     evaluator = Evaluator(name=args.dataset)

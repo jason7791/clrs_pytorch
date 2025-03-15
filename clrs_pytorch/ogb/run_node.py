@@ -71,7 +71,7 @@ def load_model(model, checkpoint_path):
     """Load model parameters from the checkpoint file."""
     if os.path.exists(checkpoint_path):
         logging.info(f"Loading model from {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        checkpoint = torch.load(checkpoint_path, weights_only=True)
         model.load_state_dict(checkpoint)
     else:
         logging.warning(f"No checkpoint found at {checkpoint_path}, starting from scratch.")
