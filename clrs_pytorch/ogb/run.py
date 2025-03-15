@@ -10,7 +10,6 @@ import torch.optim as optim
 from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
-from torch_geometric.data import Data
 
 from baselines import BaselineModel
 from baselines_parallel import ParallelMPNNModel
@@ -78,7 +77,7 @@ def main():
     
     # Argument parser setup
     parser = argparse.ArgumentParser(description="GNN on OGB datasets")
-    parser.add_argument("--dataset", type=str, choices=["ogbg-molhiv", "ogbg-molpcba"], default="ogbg-molhiv", help="Dataset name")
+    parser.add_argument("--dataset", type=str, choices=["ogbg-molhiv", "ogbg-molpcba"], default="ogbg-molpcba", help="Dataset name")
     parser.add_argument("--device", type=int, default=0, help="GPU device ID")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
@@ -102,7 +101,6 @@ def main():
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
     
     # Load dataset and evaluator based on the dataset argument
-    torch.serialization.add_safe_globals([Data])
     dataset = PygGraphPropPredDataset(name=args.dataset)
     split_idx = dataset.get_idx_split()
     evaluator = Evaluator(name=args.dataset)
