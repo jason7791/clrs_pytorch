@@ -142,6 +142,8 @@ class ParallelMPNNModel(nn.Module):
             mask = batch_idx[edge_index[0]] == i
             local_edge_index = edge_index[:, mask]
             local_edge_fts = edge_fts[mask]
+            if local_edge_index.numel() == 0:  # Check if empty
+                continue  # Skip this graph
             # Normalize local edge indices to start at 0.
             local_edge_index = local_edge_index - local_edge_index.min()
             edge_fts_dense[i, local_edge_index[0], local_edge_index[1]] = local_edge_fts
