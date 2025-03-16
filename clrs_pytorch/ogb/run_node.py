@@ -116,7 +116,7 @@ def main():
         # If the sparse tensor is in CSC format, convert it to CSR.
         if data.adj_t.layout == torch.sparse_csc:
             data.adj_t = data.adj_t.to_sparse_csr()
-        data.adj_t = data.adj_t + data.adj_t.transpose(0, 1)
+        data.adj_t = data.adj_t + data.adj_t.transpose(0, 1).to_sparse_csr()
 
     data = data.to(device)
 
