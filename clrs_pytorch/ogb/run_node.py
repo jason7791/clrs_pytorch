@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-
+from torch_sparse import SparseTensor  # Import SparseTensor
 import torch_geometric.transforms as T
 from ogb.nodeproppred import PygNodePropPredDataset, Evaluator
 from torch_geometric.loader import NeighborLoader
@@ -122,12 +122,17 @@ def main():
     dataset = PygNodePropPredDataset(name=args.dataset, transform=T.ToSparseTensor())
     data = dataset[0]
     # Ensure the adjacency matrix is symmetric.
-    if hasattr(data.adj_t, 'to_symmetric'):
-        data.adj_t = data.adj_t.to_symmetric()
-    else:
-        if data.adj_t.layout == torch.sparse_csc:
-            data.adj_t = data.adj_t.to_sparse_csr()
-        data.adj_t = data.adj_t + data.adj_t.transpose(0, 1).to_sparse_csr()
+    # if hasattr(data.adj_t, 'to_symmetric'):
+    #     data.adj_t = data.adj_t.to_symmetric()
+    # else:
+    #     if data.adj_t.layout == torch.sparse_csc:
+    #         data.adj_t = data.adj_t.to_sparse_csr()
+    #     data.adj_t = data.adj_t + data.adj_t.transpose(0, 1).to_sparse_csr()
+    if not isinstance(data.adj_t, SparseTensor):
+        # If it's a dense tensor, convert it:
+        data.adj_t = SparseTensor.from_dense(data.adj_t)
+    # Now, make the adjacency symmetric.
+    data.adj_t = data.adj_t.to_symmetric()
 
     split_idx = dataset.get_idx_split()
     out_dim = dataset.num_tasks if hasattr(dataset, "num_tasks") else dataset.num_classes
