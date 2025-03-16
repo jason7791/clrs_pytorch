@@ -145,7 +145,9 @@ class MPNN(Processor):
 
     def get_triplet_msgs(self, z, edge_fts, graph_fts, nb_triplet_fts):
         """Triplet messages, as done by Dudzik and Velickovic (2022)."""
-
+        print("z fts shape", z.shape)
+        print("edge fts shape", edge_fts.shape)
+        print("graph fts shape", graph_fts.shape)
 
         tri_1 = self.t_1(z)
         tri_2 = self.t_2(z)
