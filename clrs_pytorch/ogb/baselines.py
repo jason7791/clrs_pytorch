@@ -61,6 +61,7 @@ def restore_model(model, pretrained_weights_path):
     model.load_state_dict(updated_state_dict, strict=False)
     logging.info(f"Model restored from {pretrained_weights_path}")
 
+    print_weight_norms(model, prefix="Restored Param - ")
 
 # ---------------------- Baseline Model ---------------------- #
 
