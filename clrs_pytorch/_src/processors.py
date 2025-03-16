@@ -194,11 +194,14 @@ class MPNN(Processor):
         tri_msgs = None
 
         if self.use_triplets:
-            triplets = self.get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
-            tri_msgs = self.o3(torch.max(triplets, dim=1).values)  # (B, N, N, H)
+            print("z fts shape", z.shape)
+            print("edge fts shape", edge_fts.shape)
+            print("graph fts shape", graph_fts.shape)
+            # triplets = self.get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
+            # tri_msgs = self.o3(torch.max(triplets, dim=1).values)  # (B, N, N, H)
 
-            if self.activation is not None:
-                tri_msgs = self.activation(tri_msgs)
+            # if self.activation is not None:
+            #     tri_msgs = self.activation(tri_msgs)
 
 
         # Message aggregation
