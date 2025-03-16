@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.utils import to_dense_adj  # For dense conversion
 
-from clrs_pytorch._src.processors import MPNN
+from processors_node import MPNNEfficient
 
 # ---------------------- Utility Functions ---------------------- #
 
@@ -72,7 +72,7 @@ class BaselineNodeModel(nn.Module):
         
         # Build MPNN layers.
         for i in range(num_layers):
-            mpnn_layer = MPNN(
+            mpnn_layer = MPNNEfficient(
                 out_size=hidden_dim,
                 mid_size=hidden_dim,
                 reduction=torch.max,
@@ -124,17 +124,6 @@ class BaselineNodeModel(nn.Module):
         # Add a batch dimension: assume a single graph.
         node_fts = node_fts.unsqueeze(0)  # [1, N, hidden_dim]
         
-        # Convert the sparse adjacency to dense.
-        # Note: This conversion may be infeasible for large graphs.
-        dense_adj = adj_t.to_dense()  # [N, N]
-        dense_adj = dense_adj.unsqueeze(0)  # [1, N, N]
-        
-        # Create dummy edge features.
-        # Here, we use the dense adjacency indicator and repeat it to have feature dimension = hidden_dim.
-        edge_fts = dense_adj.unsqueeze(-1).repeat(1, 1, 1, self.hidden_dim)  # [1, N, N, hidden_dim]
-        
-        # Create dummy graph features for the single graph.
-        graph_fts = torch.zeros((1, self.hidden_dim), device=device)  # [1, hidden_dim]
         hidden = torch.zeros_like(node_fts, device=device)
         triplet_msgs = None
 
@@ -142,9 +131,6 @@ class BaselineNodeModel(nn.Module):
         for layer in self.layers:
             hidden, triplet_msgs = layer(
                 node_fts=node_fts,
-                edge_fts=edge_fts,
-                graph_fts=graph_fts,
-                adj_mat=dense_adj,
                 hidden=hidden,
                 triplet_msgs=triplet_msgs
             )

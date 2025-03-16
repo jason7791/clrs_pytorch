@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.utils import to_dense_adj  # For dense conversion
 
-from clrs_pytorch._src.processors import MPNN
+from processors_node import MPNNEfficient
 from clrs_pytorch.ogb.baselines import print_weight_norms, rename_keys, restore_model
 
 # ---------------------- Parallel Node Model ---------------------- #
@@ -46,7 +46,7 @@ class ParallelNodeModel(nn.Module):
         
         for i in range(num_layers):
             # Create two MPNN streams: one randomly initialized, one pretrained.
-            random_mpnn = MPNN(
+            random_mpnn = MPNNEfficient(
                 out_size=hidden_dim,
                 mid_size=hidden_dim,
                 reduction=torch.max,
@@ -57,7 +57,7 @@ class ParallelNodeModel(nn.Module):
                 nb_triplet_fts=nb_triplet_fts,
                 gated=gated,
             )
-            pretrained_mpnn = MPNN(
+            pretrained_mpnn = MPNNEfficient(
                 out_size=hidden_dim,
                 mid_size=hidden_dim,
                 reduction=torch.max,
@@ -108,22 +108,11 @@ class ParallelNodeModel(nn.Module):
         device = x.device
         
         # Project raw node features.
-        h = self.node_projector(x)  # [N, hidden_dim]
+        node_fts = self.node_projector(x)  # [N, hidden_dim]
         # Add a batch dimension (assume single graph).
-        h = h.unsqueeze(0)  # [1, N, hidden_dim]
-        
-        # Convert the sparse adjacency to a dense tensor.
-        dense_adj = adj_t.to_dense()  # [N, N]
-        dense_adj = dense_adj.unsqueeze(0)  # [1, N, N]
-        
-        # Create dummy edge features: use the dense adjacency indicator and expand to hidden_dim.
-        edge_fts = dense_adj.unsqueeze(-1).repeat(1, 1, 1, self.hidden_dim)  # [1, N, N, hidden_dim]
-        
-        # Create dummy graph features for the single graph.
-        graph_fts = torch.zeros((1, self.hidden_dim), device=device)  # [1, hidden_dim]
-        
-        # Initialize hidden state and triplet messages.
-        hidden = h
+        node_fts = node_fts.unsqueeze(0)  # [1, N, hidden_dim]
+
+        hidden = torch.zeros_like(node_fts, device=device)
         triplet_msgs = None
         
         # Process each layer.
@@ -133,18 +122,12 @@ class ParallelNodeModel(nn.Module):
 
             # Process the two streams separately with triplet messages.
             random_out, random_triplet = random_mpnn(
-                node_fts=h,
-                edge_fts=edge_fts,
-                graph_fts=graph_fts,
-                adj_mat=dense_adj,
+                node_fts=node_fts,
                 hidden=hidden,
                 triplet_msgs=triplet_msgs
             )
             pretrained_out, pretrained_triplet = pretrained_mpnn(
-                node_fts=h,
-                edge_fts=edge_fts,
-                graph_fts=graph_fts,
-                adj_mat=dense_adj,
+                node_fts=node_fts,
                 hidden=hidden,
                 triplet_msgs=triplet_msgs
             )
@@ -159,7 +142,7 @@ class ParallelNodeModel(nn.Module):
 
         
         # Remove the batch dimension.
-        h = h.squeeze(0)  # [N, hidden_dim]
+        hidden = hidden.squeeze(0)  # [N, hidden_dim]
         # Compute per-node predictions.
-        out = self.prediction_head(h)  # [N, out_dim]
+        out = self.prediction_head(hidden)  # [N, out_dim]
         return F.log_softmax(out, dim=-1)
