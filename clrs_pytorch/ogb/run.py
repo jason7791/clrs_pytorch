@@ -77,7 +77,7 @@ def main():
     
     # Argument parser setup
     parser = argparse.ArgumentParser(description="GNN on OGB datasets")
-    parser.add_argument("--dataset", type=str, choices=["ogbg-molhiv", "ogbg-molpcba"], default="ogbg-molpcba", help="Dataset name")
+    parser.add_argument("--dataset", type=str, choices=["ogbg_molhiv", "ogbg_molpcba"], default="ogbg_molpcba", help="Dataset name")
     parser.add_argument("--device", type=int, default=0, help="GPU device ID")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
@@ -108,7 +108,7 @@ def main():
     
     # Select the appropriate metric key for logging and evaluation.
     # ogbg-molhiv uses ROC-AUC while ogbg-molpcba uses Average Precision (AP)
-    metric_key = "rocauc" if args.dataset == "ogbg-molhiv" else "ap"
+    metric_key = "rocauc" if args.dataset == "ogbg_molhiv" else "ap"
     
     # Set random seed
     set_seed(args.seed)
