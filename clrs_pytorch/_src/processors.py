@@ -145,9 +145,7 @@ class MPNN(Processor):
 
     def get_triplet_msgs(self, z, edge_fts, graph_fts, nb_triplet_fts):
         """Triplet messages, as done by Dudzik and Velickovic (2022)."""
-        print("z fts shape", z.shape)
-        print("edge fts shape", edge_fts.shape)
-        print("graph fts shape", graph_fts.shape)
+
 
         tri_1 = self.t_1(z)
         tri_2 = self.t_2(z)
@@ -194,14 +192,11 @@ class MPNN(Processor):
         tri_msgs = None
 
         if self.use_triplets:
-            print("z fts shape", z.shape)
-            print("edge fts shape", edge_fts.shape)
-            print("graph fts shape", graph_fts.shape)
-            # triplets = self.get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
-            # tri_msgs = self.o3(torch.max(triplets, dim=1).values)  # (B, N, N, H)
+            triplets = self.get_triplet_msgs(z, edge_fts, graph_fts, self.nb_triplet_fts)
+            tri_msgs = self.o3(torch.max(triplets, dim=1).values)  # (B, N, N, H)
 
-            # if self.activation is not None:
-            #     tri_msgs = self.activation(tri_msgs)
+            if self.activation is not None:
+                tri_msgs = self.activation(tri_msgs)
 
 
         # Message aggregation
@@ -224,7 +219,11 @@ class MPNN(Processor):
 
         # Reduction
         if self.reduction == torch.max:
-            msgs, _ = torch.max(msgs, dim=1)
+            # Perform max reduction
+            maxarg = torch.where(adj_mat.unsqueeze(-1).bool(),
+                                msgs,
+                                -BIG_NUMBER)
+            msgs, _ = torch.max(maxarg, dim=1)
         else:
             # Perform custom reduction
             msgs = self.reduction(msgs * adj_mat.unsqueeze(-1), dim=1)
