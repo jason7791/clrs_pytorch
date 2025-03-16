@@ -176,12 +176,12 @@ class ParallelMPNNModel(nn.Module):
             )
             # Concatenate the main outputs from both streams.
             concatenated = torch.cat([random_out, pretrained_out], dim=-1)  # [1, N, 2*hidden_dim]
-            hidden = self.reduction_layers[i](concatenated)  # [1, N, hidden_dim]
+            hidden = nn.ReLU(self.reduction_layers[i](concatenated))  # [1, N, hidden_dim]
             
             # Similarly, concatenate the triplet messages.
             if(self.use_triplets):
                 concatenated_triplet = torch.cat([random_triplet, pretrained_triplet], dim=-1)  # [1, N, N, 2*hidden_dim]
-                triplet_msgs = self.triplet_reduction_layers[i](concatenated_triplet)  # [1, N, N, hidden_dim]
+                triplet_msgs = nn.ReLU(self.triplet_reduction_layers[i](concatenated_triplet))  # [1, N, N, hidden_dim]
 
         # Aggregate node representations via mean pooling to form graph embeddings.
         graph_emb = hidden.mean(dim=1)  # (B, F)
