@@ -35,12 +35,13 @@ def train_epoch(model, device, loader, optimizer, criterion):
         batch = batch.to(device)
         optimizer.zero_grad()
         out = model(batch.x, batch.adj_t)
-        # Use the target nodes (given by batch.batch) for computing loss.
-        loss = criterion(out[batch.batch], batch.y[batch.batch].squeeze(1))
+        # Use the first batch.batch_size nodes as the seed nodes.
+        seed_size = batch.batch_size  
+        loss = criterion(out[:seed_size], batch.y[:seed_size].squeeze(1))
         loss.backward()
         optimizer.step()
-        total_loss += loss.item() * batch.batch.size(0)
-        total_examples += batch.batch.size(0)
+        total_loss += loss.item() * seed_size
+        total_examples += seed_size
     return total_loss / total_examples
 
 @torch.no_grad()
@@ -52,8 +53,9 @@ def evaluate_epoch(model, device, loader, evaluator, metric_key):
         batch = batch.to(device)
         out = model(batch.x, batch.adj_t)
         pred = out.argmax(dim=-1, keepdim=True)
-        y_true_list.append(batch.y[batch.batch])
-        y_pred_list.append(pred[batch.batch])
+        seed_size = batch.batch_size  # first batch.batch_size nodes are seed nodes.
+        y_true_list.append(batch.y[:seed_size])
+        y_pred_list.append(pred[:seed_size])
     y_true = torch.cat(y_true_list, dim=0)
     y_pred = torch.cat(y_pred_list, dim=0)
     return evaluator.eval({'y_true': y_true, 'y_pred': y_pred})[metric_key]
