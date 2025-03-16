@@ -72,7 +72,7 @@ class Processor(nn.Module):
   def inf_bias_edge(self):
     return False
 
-class PGN(Processor):
+class MPNN(Processor):
     """Pointer Graph Networks (Veličković et al., NeurIPS 2020)."""
 
     def __init__(
@@ -175,7 +175,6 @@ class PGN(Processor):
         triplet_msgs=None,
         **unused_kwargs,
     ) -> Tuple[_Array, Optional[_Array]]:
-        """PGN inference step."""
 
         b, n, _ = node_fts.shape
         assert edge_fts.shape[:-1] == (b, n, n)
@@ -219,16 +218,8 @@ class PGN(Processor):
             msgs = self.mid_act(msgs)
 
         # Reduction
-        if self.reduction == torch.mean:
-            # Perform mean reduction
-            msgs = torch.sum(msgs * adj_mat.unsqueeze(-1), dim=1)
-            msgs = msgs / torch.sum(adj_mat, dim=-1, keepdim=True)
-        elif self.reduction == torch.max:
-            # Perform max reduction
-            maxarg = torch.where(adj_mat.unsqueeze(-1).bool(),
-                                msgs,
-                                -BIG_NUMBER)
-            msgs, _ = torch.max(maxarg, dim=1)
+        if self.reduction == torch.max:
+            msgs, _ = torch.max(msgs, dim=1)
         else:
             # Perform custom reduction
             msgs = self.reduction(msgs * adj_mat.unsqueeze(-1), dim=1)
@@ -249,21 +240,6 @@ class PGN(Processor):
 
         return ret, tri_msgs  # Updated node embeddings and triplet messages
 
-
-class MPNN(PGN):
-    """Message-Passing Neural Network (Gilmer et al., ICML 2017)."""
-
-    def forward(
-        self,
-        node_fts: _Array,
-        edge_fts: _Array,
-        graph_fts: _Array,
-        adj_mat: _Array,
-        hidden: _Array,
-        **unused_kwargs,
-    ) -> Tuple[_Array, Optional[_Array]]:
-        adj_mat = torch.ones_like(adj_mat)
-        return super().forward(node_fts, edge_fts, graph_fts, adj_mat, hidden, **unused_kwargs)
 
 
 ProcessorFactory = Callable[[int], Processor]
@@ -295,14 +271,6 @@ def get_processor_factory(
                 use_triplets=False,
                 nb_triplet_fts=0,
             )
-        elif kind == 'pgn':
-            processor = PGN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=False,
-                nb_triplet_fts=0,
-            )
         elif kind == 'triplet_mpnn':
             processor = MPNN(
                 out_size=out_size,
@@ -311,38 +279,12 @@ def get_processor_factory(
                 use_triplets=True,
                 nb_triplet_fts=nb_triplet_fts,
             )
-        elif kind == 'triplet_pgn':
-            processor = PGN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=True,
-                nb_triplet_fts=nb_triplet_fts,
-            )
-        elif kind == 'gpgn':
-            processor = PGN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=False,
-                nb_triplet_fts=nb_triplet_fts,
-                gated=True,
-            )
         elif kind == 'gmpnn':
             processor = MPNN(
                 out_size=out_size,
                 msgs_mlp_sizes=[out_size, out_size],
                 use_ln=use_ln,
                 use_triplets=False,
-                nb_triplet_fts=nb_triplet_fts,
-                gated=True,
-            )
-        elif kind == 'triplet_gpgn':
-            processor = PGN(
-                out_size=out_size,
-                msgs_mlp_sizes=[out_size, out_size],
-                use_ln=use_ln,
-                use_triplets=True,
                 nb_triplet_fts=nb_triplet_fts,
                 gated=True,
             )
