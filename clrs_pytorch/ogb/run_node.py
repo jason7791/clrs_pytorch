@@ -53,7 +53,8 @@ def evaluate_epoch(model, device, loader, evaluator, metric_key):
         batch = batch.to(device)
         out = model(batch.x, batch.adj_t)
         pred = out.argmax(dim=-1, keepdim=True)
-        seed_size = batch.batch_size  # first batch.batch_size nodes are seed nodes.
+        # Only use the seed nodes (the first batch.batch_size nodes).
+        seed_size = batch.batch_size  
         y_true_list.append(batch.y[:seed_size])
         y_pred_list.append(pred[:seed_size])
     y_true = torch.cat(y_true_list, dim=0)
@@ -123,15 +124,8 @@ def main():
     # Do not move the entire graph to GPU, as mini-batches will be sampled.
     dataset = PygNodePropPredDataset(name=args.dataset, transform=T.ToSparseTensor())
     data = dataset[0]
-    # Ensure the adjacency matrix is symmetric.
-    # if hasattr(data.adj_t, 'to_symmetric'):
-    #     data.adj_t = data.adj_t.to_symmetric()
-    # else:
-    #     if data.adj_t.layout == torch.sparse_csc:
-    #         data.adj_t = data.adj_t.to_sparse_csr()
-    #     data.adj_t = data.adj_t + data.adj_t.transpose(0, 1).to_sparse_csr()
+    # Ensure that data.adj_t is a SparseTensor.
     if not isinstance(data.adj_t, SparseTensor):
-        # If it's a dense tensor, convert it:
         data.adj_t = SparseTensor.from_dense(data.adj_t)
     # Now, make the adjacency symmetric.
     data.adj_t = data.adj_t.to_symmetric()
