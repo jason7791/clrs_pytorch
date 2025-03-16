@@ -174,8 +174,6 @@ class MPNNEfficient(Processor):
 
         if self.use_triplets:
             print("z fts shape", z.shape)
-            print("edge fts shape", edge_fts.shape)
-            print("graph fts shape", graph_fts.shape)
             # triplets = self.get_triplet_msgs(z)
             # tri_msgs = self.o3(torch.max(triplets, dim=1).values)  # (B, N, N, H)
 
