@@ -48,6 +48,7 @@ class ParallelMPNNModel(nn.Module):
         self.use_triplets = use_triplets
         self.layers = nn.ModuleList()
         self.reduction_layers = nn.ModuleList()
+        self.layer_norms = nn.ModuleList()
         if self.use_triplets:
             self.triplet_reduction_layers = nn.ModuleList()
 
@@ -90,6 +91,7 @@ class ParallelMPNNModel(nn.Module):
 
             # Linear layer to reduce concatenated output (2 * hidden_dim) to hidden_dim.
             self.reduction_layers.append(nn.Linear(2 * hidden_dim, hidden_dim))
+            self.layer_norms.append(nn.LayerNorm(hidden_dim, elementwise_affine=True))
             if self.use_triplets:
                 self.triplet_reduction_layers.append(nn.Linear(2 * hidden_dim, hidden_dim))
 
@@ -175,13 +177,13 @@ class ParallelMPNNModel(nn.Module):
                 triplet_msgs=triplet_msgs
             )
             # Concatenate the main outputs from both streams.
-            concatenated = torch.cat([random_out, pretrained_out], dim=-1)  # [1, N, 2*hidden_dim]
-            hidden = F.relu(self.reduction_layers[i](concatenated))  # [1, N, hidden_dim]
+            concatenated = torch.cat([random_out, pretrained_out], dim=-1)  
+            hidden = self.layer_norms[i](F.relu(self.reduction_layers[i](concatenated)))
             
             # Similarly, concatenate the triplet messages.
             if(self.use_triplets):
                 concatenated_triplet = torch.cat([random_triplet, pretrained_triplet], dim=-1)  # [1, N, N, 2*hidden_dim]
-                triplet_msgs = F.relu(self.triplet_reduction_layers[i](concatenated_triplet))  # [1, N, N, hidden_dim]
+                triplet_msgs = self.triplet_reduction_layers[i](concatenated_triplet)  # [1, N, N, hidden_dim]
 
         # Aggregate node representations via mean pooling to form graph embeddings.
         graph_emb = hidden.mean(dim=1)  # (B, F)
