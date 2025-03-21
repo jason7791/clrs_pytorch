@@ -52,8 +52,8 @@ flags.DEFINE_boolean('enforce_pred_as_input', True, 'Convert fixed pred_h hints 
 flags.DEFINE_integer('batch_size', 16, 'Batch size for training.')
 flags.DEFINE_boolean('chunked_training', False, 'Use chunking for training.')
 flags.DEFINE_integer('chunk_length', 16, 'Time chunk length for training (if chunked_training is True).')
-flags.DEFINE_integer('train_steps', 500, 'Number of training iterations.')
-flags.DEFINE_integer('eval_every', 10, 'Evaluation frequency (in steps).')
+flags.DEFINE_integer('train_steps', 10000, 'Number of training iterations.')
+flags.DEFINE_integer('eval_every', 50, 'Evaluation frequency (in steps).')
 flags.DEFINE_integer('test_every', 500, 'Testing frequency (in steps).')
 
 flags.DEFINE_integer('hidden_size', 128, 'Number of hidden units in the model.')
