@@ -49,7 +49,7 @@ flags.DEFINE_integer('seed', 42, 'Random seed.')
 flags.DEFINE_boolean('random_pos', True, 'Randomize the pos input common to all algorithms.')
 flags.DEFINE_boolean('enforce_permutations', True, 'Enforce permutation-type node pointers.')
 flags.DEFINE_boolean('enforce_pred_as_input', True, 'Convert fixed pred_h hints into pred inputs.')
-flags.DEFINE_integer('batch_size', 32, 'Batch size for training.')
+flags.DEFINE_integer('batch_size', 16, 'Batch size for training.')
 flags.DEFINE_boolean('chunked_training', False, 'Use chunking for training.')
 flags.DEFINE_integer('chunk_length', 16, 'Time chunk length for training (if chunked_training is True).')
 flags.DEFINE_integer('train_steps', 500, 'Number of training iterations.')
@@ -60,22 +60,22 @@ flags.DEFINE_integer('hidden_size', 128, 'Number of hidden units in the model.')
 flags.DEFINE_integer('nb_heads', 1, 'Number of heads for GAT processors.')
 flags.DEFINE_integer('nb_msg_passing_steps', 1, 'Number of message passing steps per hint.')
 flags.DEFINE_float('learning_rate', 0.001, 'Learning rate.')
-flags.DEFINE_float('grad_clip_max_norm', 1.0, 'Gradient clipping norm (0.0 disables clipping).')
+flags.DEFINE_float('grad_clip_max_norm', 0.0, 'Gradient clipping norm (0.0 disables clipping).')
 flags.DEFINE_float('dropout_prob', 0.0, 'Dropout rate.')
-flags.DEFINE_float('hint_teacher_forcing', 0.0,
+flags.DEFINE_float('hint_teacher_forcing', 0.5,
                    'Probability that ground-truth teacher hints are encoded during training '
                    'instead of predicted hints (only pertinent in encoded_decoded modes).')
 flags.DEFINE_enum('hint_mode', 'encoded_decoded',
                   ['encoded_decoded', 'decoded_only', 'none'],
                   'Hint mode: encoded_decoded (hardest, default), decoded_only, or none.')
-flags.DEFINE_enum('hint_repred_mode', 'soft',
+flags.DEFINE_enum('hint_repred_mode', 'hard',
                   ['soft', 'hard', 'hard_on_eval'],
                   'Mode for processing predicted hints: soft, hard, or hard_on_eval.')
 flags.DEFINE_boolean('use_ln', True, 'Use layer normalization in the processor.')
 flags.DEFINE_boolean('use_lstm', False, 'Insert an LSTM after message passing.')
 flags.DEFINE_integer('nb_triplet_fts', 8, 'Number of triplet features to compute.')
 
-flags.DEFINE_enum('encoder_init', 'xavier_on_scalars',
+flags.DEFINE_enum('encoder_init', 'default',
                   ['default', 'xavier_on_scalars'],
                   'Initializer to use for the encoders.')
 flags.DEFINE_enum('processor_type', 'mpnn',
