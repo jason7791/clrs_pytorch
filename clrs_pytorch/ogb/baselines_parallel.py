@@ -48,7 +48,6 @@ class ParallelMPNNModel(nn.Module):
         self.use_triplets = use_triplets
         self.layers = nn.ModuleList()
         self.reduction_layers = nn.ModuleList()
-        self.layer_norms = nn.ModuleList()
         if self.use_triplets:
             self.triplet_reduction_layers = nn.ModuleList()
 
@@ -91,7 +90,6 @@ class ParallelMPNNModel(nn.Module):
 
             # Linear layer to reduce concatenated output (2 * hidden_dim) to hidden_dim.
             self.reduction_layers.append(nn.Linear(2 * hidden_dim, hidden_dim))
-            self.layer_norms.append(nn.LayerNorm(hidden_dim, elementwise_affine=True))
             if self.use_triplets:
                 self.triplet_reduction_layers.append(nn.Linear(2 * hidden_dim, hidden_dim))
 
@@ -178,7 +176,7 @@ class ParallelMPNNModel(nn.Module):
             )
             # Concatenate the main outputs from both streams.
             concatenated = torch.cat([random_out, pretrained_out], dim=-1)  
-            hidden = self.layer_norms[i](F.relu(self.reduction_layers[i](concatenated)))
+            hidden = F.relu(self.reduction_layers[i](concatenated)) 
             
             # Similarly, concatenate the triplet messages.
             if(self.use_triplets):
