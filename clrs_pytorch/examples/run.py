@@ -283,11 +283,11 @@ def create_samplers(rng: Any,
     for algo_idx, algorithm in enumerate(algorithms):
         # Run dataset pipeline on CPU.
         with device:
-            # if algorithm in ['naive_string_matcher', 'kmp_matcher']:
-            #     max_length = max(train_lengths)
-            #     if max_length > 0:
-            #         max_length = (max_length * 5) // 4
-            #     train_lengths = [max_length]
+            if algorithm in ['naive_string_matcher', 'kmp_matcher']:
+                max_length = max(train_lengths)
+                if max_length > 0:
+                    max_length = (max_length * 5) // 4
+                train_lengths = [max_length]
 
             logging.info('Creating samplers for algorithm %s', algorithm)
 
@@ -339,7 +339,7 @@ def create_samplers(rng: Any,
                 multiplier=2 * mult,
                 randomize_pos=False,
                 chunked=False,
-                sampler_kwargs=sampler_kwargs, # should be {} to ensure same test args normally
+                sampler_kwargs={}, # should be {} to ensure same test args normally
                 **common_sampler_args
             )
             test_sampler, test_samples, spec = make_multi_sampler(**test_args)
