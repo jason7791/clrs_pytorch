@@ -37,7 +37,7 @@ _Feedback = samplers.Feedback
 _Location = specs.Location
 
 # -------------------------- Flag Definitions --------------------------
-flags.DEFINE_list('algorithms', ['floyd_warshall','bubble_sort'], 'Algorithms to run.')
+flags.DEFINE_list('algorithms', ['naive_string_matcher'], 'Algorithms to run.')
 flags.DEFINE_list('train_lengths', ['4', '7', '11', '13', '16'],
                   'Training sizes to use. A size of -1 means use the benchmark dataset.')
 flags.DEFINE_integer('length_needle', -8,
@@ -93,7 +93,7 @@ flags.DEFINE_string('performance_path', '/Users/jasonwjh/Documents/clrs_pytorch/
 flags.DEFINE_string('dataset_path', '/tmp/CLRS30', 'Path where the dataset is stored.')
 flags.DEFINE_boolean('freeze_processor', False, 'Freeze the processor of the model.')
 flags.DEFINE_boolean('resume', False, 'Resume training from the last saved checkpoint if available.')
-flags.DEFINE_integer('test_lengths', -1, 'Test lengths. Defaults to -1, where we use test datasets. Else we use max of train lengths')
+flags.DEFINE_integer('test_lengths', -1, 'Test lengths. Defaults to -1, where we use test datasets. If 0 we use max of train lengths')
 
 FLAGS = flags.FLAGS
 
@@ -283,11 +283,11 @@ def create_samplers(rng: Any,
     for algo_idx, algorithm in enumerate(algorithms):
         # Run dataset pipeline on CPU.
         with device:
-            if algorithm in ['naive_string_matcher', 'kmp_matcher']:
-                max_length = max(train_lengths)
-                if max_length > 0:
-                    max_length = (max_length * 5) // 4
-                train_lengths = [max_length]
+            # if algorithm in ['naive_string_matcher', 'kmp_matcher']:
+            #     max_length = max(train_lengths)
+            #     if max_length > 0:
+            #         max_length = (max_length * 5) // 4
+            #     train_lengths = [max_length]
 
             logging.info('Creating samplers for algorithm %s', algorithm)
 
@@ -314,7 +314,7 @@ def create_samplers(rng: Any,
                 multiplier=-1,
                 randomize_pos=FLAGS.random_pos,
                 chunked=FLAGS.chunked_training,
-                sampler_kwargs=sampler_kwargs,
+                sampler_kwargs=sampler_kwargs, 
                 **common_sampler_args
             )
             train_sampler, _, spec = make_multi_sampler(**train_args)
@@ -339,7 +339,7 @@ def create_samplers(rng: Any,
                 multiplier=2 * mult,
                 randomize_pos=False,
                 chunked=False,
-                sampler_kwargs={},
+                sampler_kwargs=sampler_kwargs, # should be {} to ensure same test args normally
                 **common_sampler_args
             )
             test_sampler, test_samples, spec = make_multi_sampler(**test_args)
@@ -498,7 +498,7 @@ def main(unused_argv):
         train_lengths=train_lengths,
         algorithms=FLAGS.algorithms,
         val_lengths=[np.amax(train_lengths)],
-        test_lengths=[-1] if FLAGS.test_lengths == -1 else [np.amax(train_lengths)],
+        test_lengths=[np.amax(train_lengths)] if FLAGS.test_lengths == 0 else [FLAGS.test_lengths],
         train_batch_size=FLAGS.batch_size,
         device=device
     )
