@@ -108,7 +108,7 @@ def main():
     
     # Select the appropriate metric key for logging and evaluation.
     # ogbg-molhiv uses ROC-AUC while ogbg-molpcba uses Average Precision (AP)
-    metric_key = "rocauc" if args.dataset == "ogbg-molhiv" else "ap"
+    metric_key = "rocauc"
     
     # Set random seed
     set_seed(args.seed)
