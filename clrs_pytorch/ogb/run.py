@@ -77,7 +77,7 @@ def main():
     
     # Argument parser setup
     parser = argparse.ArgumentParser(description="GNN on OGB datasets")
-    parser.add_argument("--dataset", type=str, choices=["ogbg-molhiv", "ogbg-molpcba"], default="ogbg-molpcba", help="Dataset name")
+    parser.add_argument("--dataset", type=str, choices=["ogbg-molhiv", "ogbg-molpcba", "ogbg-moltox21"], default="ogbg-molpcba", help="Dataset name")
     parser.add_argument("--device", type=int, default=0, help="GPU device ID")
     parser.add_argument("--epochs", type=int, default=200, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
