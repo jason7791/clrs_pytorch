@@ -5,7 +5,7 @@ import tempfile
 from unittest.mock import patch
 from torch_geometric.data import Data
 
-from baselines import (
+from clrs_pytorch.ogb.baselines_serial import (
     BaselineModel, restore_model, rename_keys, print_weight_norms
 )
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
@@ -100,7 +100,7 @@ class TestBaselines(unittest.TestCase):
         for p1, p2 in zip(model.parameters(), new_model.parameters()):
             self.assertTrue(torch.equal(p1, p2), "Model parameters should match after loading checkpoint")
 
-    @patch("baselines.logging.info")
+    @patch("baselines_serial.logging.info")
     def test_print_weight_norms(self, mock_log):
         """Test printing of weight norms."""
         model = BaselineModel(**self.default_model_args)

@@ -7,7 +7,7 @@ from torch_geometric.utils import to_dense_batch
 from ogb.graphproppred.mol_encoder import AtomEncoder, BondEncoder
 
 from clrs_pytorch._src.processors import MPNN
-from clrs_pytorch.ogb.baselines import print_weight_norms, rename_keys, restore_model
+from clrs_pytorch.ogb.baselines_serial import print_weight_norms, rename_keys, restore_model
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

@@ -11,7 +11,7 @@ from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
 
-from baselines import BaselineModel
+from baselines_serial import BaselineModel
 from baselines_parallel import ParallelMPNNModel
 
 # ---------------------- Utility Functions ---------------------- #
@@ -79,7 +79,7 @@ def main():
     
     # Argument parser setup
     parser = argparse.ArgumentParser(description="GNN on OGB datasets")
-    parser.add_argument("--dataset", type=str, choices=["ogbg-molhiv", "ogbg-molpcba", "ogbg-moltox21", "ogbg-molbace", "ogbg-molbbbp", "ogbg-molclintox", "ogbg-molmuv", "ogbg-molsider", "ogbg-moltoxcast"], default="ogbg-molpcba", help="Dataset name")
+    parser.add_argument("--dataset", type=str, choices=["ogbg-molhiv", "ogbg-molpcba", "ogbg-moltox21", "ogbg-molbace", "ogbg-molbbbp", "ogbg-molclintox", "ogbg-molmuv", "ogbg-molsider", "ogbg-moltoxcast"], default="ogbg-molclintox", help="Dataset name")
     parser.add_argument("--device", type=int, default=0, help="GPU device ID")
     parser.add_argument("--epochs", type=int, default=200, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
