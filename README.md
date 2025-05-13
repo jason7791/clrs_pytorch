@@ -1,4 +1,4 @@
-# The CLRS Algorithmic Reasoning Benchmark
+# The PyTorch CLRS Algorithmic Reasoning Benchmark
 
 Learning representations of algorithms is an emerging area of machine learning,
 seeking to bridge concepts from neural networks with classical algorithms. The
@@ -7,6 +7,8 @@ work toward evaluation algorithmic reasoning by providing a suite of
 implementations of classical algorithms. These algorithms have been selected
 from the third edition of the standard *Introduction to Algorithms* by Cormen,
 Leiserson, Rivest and Stein.
+
+This project builds on the original CLRS Algorithmic Reasoning Benchmark implemented in JAX by Google Deepmind. Here we provide a PyTorch implementation of the CLRS baseline model. In addition, we provide a PyTorch baseline model for the Open Graph Benchmark (OGB) tasks, allowing us to easily transfer weights from the CLRS model to the OGB model to directly evaluate the effects of pretraining on classical algorithms.
 
 ## Getting started
 
@@ -32,7 +34,7 @@ source clrs_env/bin/activate
 pip install git+https://github.com/google-deepmind/clrs.git
 ```
 
-Once installed you can run our example baseline model:
+Once installed you can run our example CLRS baseline model:
 
 ```shell
 python3 -m clrs.examples.run
@@ -41,6 +43,12 @@ python3 -m clrs.examples.run
 If this is the first run of the example, the dataset will be downloaded and
 stored in `--dataset_path` (default '/tmp/CLRS30').
 Alternatively, you can also download and extract https://storage.googleapis.com/dm-clrs/CLRS30_v1.0.0.tar.gz
+
+you can also run our example OGB baseline model:
+
+```shell
+python3 -m ogb.examples.run
+```
 
 ## Algorithms as graphs
 
