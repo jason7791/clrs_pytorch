@@ -65,9 +65,9 @@ def restore_model(model, pretrained_weights_path):
 
 # ---------------------- Baseline Model ---------------------- #
 
-class BaselineFreezeEarlyLayersModel(nn.Module):
+class BaselineFullyTrainableModel(nn.Module):
     """
-    Baseline Graph Neural Network model that freezes early layers.
+    Baseline Graph Neural Network model that is fully trainable.
 
     Args:
         out_dim (int): Output dimension.
@@ -83,7 +83,7 @@ class BaselineFreezeEarlyLayersModel(nn.Module):
 
     def __init__(self, out_dim, hidden_dim, num_layers, reduction, use_pretrain_weights, pretrained_weights_path,
                  use_triplets, gated, nb_triplet_fts=8):
-        super(BaselineFreezeEarlyLayersModel, self).__init__()
+        super(BaselineFullyTrainableModel, self).__init__()
 
         self.num_layers = num_layers
         self.use_triplets = use_triplets
@@ -102,13 +102,11 @@ class BaselineFreezeEarlyLayersModel(nn.Module):
                 gated=gated
             )
 
-            if use_pretrain_weights and i <2: 
+            if use_pretrain_weights: 
                 logging.info(f"Freezing pretrained weights for layer {i}")
                 print_weight_norms(mpnn_layer, prefix=f"Layer {i} - BEFORE LOADING: ")
                 
                 restore_model(mpnn_layer, pretrained_weights_path)
-                for param in mpnn_layer.parameters():
-                    param.requires_grad = False
                 
                 print_weight_norms(mpnn_layer, prefix=f"Layer {i} - AFTER LOADING: ")
             else:

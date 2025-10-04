@@ -13,7 +13,8 @@ from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
 
 from baselines_serial import BaselineModel
 from baselines_parallel import ParallelMPNNModel
-
+from baselines_freeze_early_layers import BaselineFreezeEarlyLayersModel
+from baselines_fully_trainable import BaselineFullyTrainableModel
 # ---------------------- Utility Functions ---------------------- #
 
 def set_seed(seed: int):
@@ -21,8 +22,8 @@ def set_seed(seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.benchmark = False 
-    torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False 
+    # torch.backends.cudnn.deterministic = True
 
 def train(model, device, loader, optimizer, criterion):
     """Train the model for one epoch."""
@@ -125,7 +126,15 @@ def main():
 
     # Initialize model
     # The output dimension is automatically set based on the dataset's number of tasks.
-    ModelClass = BaselineModel if args.model == "serial" else ParallelMPNNModel
+    if args.model=="parallel":
+        ModelClass = ParallelMPNNModel     
+    elif args.model=="freeze_early_layers":
+        ModelClass =  BaselineFreezeEarlyLayersModel
+    elif args.model=="fully_trainable":
+        ModelClass =  BaselineFullyTrainableModel
+    else:
+        ModelClass = BaselineModel
+
     model = ModelClass(
         out_dim=dataset.num_tasks,
         hidden_dim=args.hidden_dim,
