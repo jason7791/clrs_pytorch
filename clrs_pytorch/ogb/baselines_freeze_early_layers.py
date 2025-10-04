@@ -131,54 +131,36 @@ class BaselineFreezeEarlyLayersModel(nn.Module):
                 nn.Linear(3 * hidden_dim, hidden_dim) for _ in range(num_layers)
             ])
 
-    def forward(self, batch):
+    def _graph_embedding(self, batch):
         """
-        Forward pass of the model.
-
-        Args:
-            batch (torch_geometric.data.Batch): Input batch.
-
-        Returns:
-            torch.Tensor: Predicted graph-level outputs.
+        Returns graph-level embeddings (before final prediction MLP).
         """
         x, edge_index, edge_attr, batch_idx = batch.x, batch.edge_index, batch.edge_attr, batch.batch
-        device = x.device  
+        device = x.device
 
-        # Encode node and edge features
+        # Encode node/edge features
         node_fts = self.atom_encoder(x).to(device)
         edge_fts = self.bond_encoder(edge_attr).to(device)
 
-        # Convert batch data to dense format
-        node_fts_dense, mask = to_dense_batch(node_fts, batch=batch_idx)
+        # Dense node batch
+        node_fts_dense, node_mask = to_dense_batch(node_fts, batch=batch_idx)  # (B, N, F)
 
-        num_graphs = batch_idx.max().item() + 1
-        max_nodes = node_fts_dense.size(1)
+        # Dense adjacency & dense edge features (use PyG util; removes your manual loop/ones)
+        # Shapes: adj: (B, N, N), edge_fts_dense: (B, N, N, F_e)
+        edge_fts_dense = to_dense_adj(edge_index, batch=batch_idx, edge_attr=edge_fts).to(device)
+
+        # Graph-level features placeholder (match your processor sig)
         edge_feature_dim = edge_fts.size(-1)
-
-        # Initialize adjacency and edge feature matrices
-        adj_mat = torch.ones((num_graphs, max_nodes, max_nodes), device=device)
-        edge_fts_dense = torch.zeros((num_graphs, max_nodes, max_nodes, edge_feature_dim), device=device)
-
-        # Populate adjacency and edge feature matrices
-        for i in range(num_graphs):
-            mask = batch_idx[edge_index[0]] == i
-            local_edge_index = edge_index[:, mask]
-            local_edge_fts = edge_fts[mask]
-            if local_edge_index.numel() == 0:  # Check if empty
-                continue  # Skip this graph
-            local_edge_index -= local_edge_index.min()  # Normalize indices
-            edge_fts_dense[i, local_edge_index[0], local_edge_index[1]] = local_edge_fts
-
-        # Initialize graph and hidden representations
+        num_graphs, max_nodes = node_fts_dense.size(0), node_fts_dense.size(1)
         graph_fts = torch.zeros((num_graphs, edge_feature_dim), device=device)
+        adj_mat = torch.ones((num_graphs, max_nodes, max_nodes), device=device)
+        
         hidden = torch.zeros_like(node_fts_dense, device=device)
         triplet_msgs = None
 
-        # Message Passing Layers
         for i, layer in enumerate(self.layers):
-
             hidden, triplet_msgs = layer(
-                node_fts=node_fts_dense, 
+                node_fts=node_fts_dense,
                 edge_fts=edge_fts_dense,
                 graph_fts=graph_fts,
                 adj_mat=adj_mat,
@@ -187,7 +169,16 @@ class BaselineFreezeEarlyLayersModel(nn.Module):
             )
 
         # Aggregate node features into graph-level embeddings
-        graph_emb = hidden.mean(dim=1)  # B x F
+        graph_emb = hidden.mean(dim=1)  # (B, F)
+        return graph_emb
 
-        # Final prediction
-        return self.graph_pred(graph_emb.to(device))  # B x out_dim
+    def forward(self, batch):
+        graph_emb = self._graph_embedding(batch)
+        return self.graph_pred(graph_emb)
+
+    @torch.no_grad()
+    def get_graph_embeddings(self, batch):
+        self.eval()
+        return self._graph_embedding(batch)
+
+       
