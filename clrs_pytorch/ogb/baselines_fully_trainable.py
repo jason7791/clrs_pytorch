@@ -145,14 +145,14 @@ class BaselineFullyTrainableModel(nn.Module):
 
         # Dense adjacency & dense edge features (use PyG util; removes your manual loop/ones)
         # Shapes: adj: (B, N, N), edge_fts_dense: (B, N, N, F_e)
-        adj_mat = torch.ones((num_graphs, max_nodes, max_nodes), device=device)
         edge_fts_dense = to_dense_adj(edge_index, batch=batch_idx, edge_attr=edge_fts).to(device)
 
         # Graph-level features placeholder (match your processor sig)
         edge_feature_dim = edge_fts.size(-1)
         num_graphs, max_nodes = node_fts_dense.size(0), node_fts_dense.size(1)
         graph_fts = torch.zeros((num_graphs, edge_feature_dim), device=device)
-
+        adj_mat = torch.ones((num_graphs, max_nodes, max_nodes), device=device)
+        
         hidden = torch.zeros_like(node_fts_dense, device=device)
         triplet_msgs = None
 
