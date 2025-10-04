@@ -11,7 +11,7 @@ from tqdm import tqdm
 from torch_geometric.loader import DataLoader
 from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
 
-from baselines_freeze_early_layers import BaselineModel
+from baselines_serial import BaselineModel
 from baselines_parallel import ParallelMPNNModel
 
 # ---------------------- Utility Functions ---------------------- #
