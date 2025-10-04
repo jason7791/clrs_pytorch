@@ -90,7 +90,7 @@ def main():
     parser.add_argument("--performance_path", type=str, default="performance.json", help="Path to save performance metrics")
     parser.add_argument("--early_stop_patience", type=int, default=10, help="Early stopping patience")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--model", type=str, choices=["serial", "parallel"], default="serial", help="Model type: serial or parallel")
+    parser.add_argument("--model", type=str, choices=["serial", "parallel", "freeze_early_layers", "fully_trainable"], default="serial", help="Model type: serial or parallel")
     parser.add_argument("--gated", action="store_true", help="Use gated message passing")
     parser.add_argument("--use_triplets", action="store_true", help="Use triplet reasoning")
     parser.add_argument("--use_pretrain_weights", action="store_true", help="Use pre-trained weights")
