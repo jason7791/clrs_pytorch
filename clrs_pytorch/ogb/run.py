@@ -187,6 +187,11 @@ def main():
 
     # Training loop with early stopping, starting from the next epoch.
     for epoch in range(start_epoch + 1, args.epochs + 1):
+        # Check early stopping condition.
+        if early_stop_counter >= args.early_stop_patience:
+            logging.info(f"Early stopping triggered at epoch {epoch}.")
+            break
+    
         logging.info(f"Epoch {epoch} / {args.epochs}")
         
         # Train and evaluate.
@@ -216,11 +221,6 @@ def main():
             "test_accuracies": test_acc_list
         }
         save_results(results, args.performance_path)
-
-        # Check early stopping condition.
-        if early_stop_counter >= args.early_stop_patience:
-            logging.info(f"Early stopping triggered at epoch {epoch}.")
-            break
 
     # Restore best model for final evaluation.
     load_model(model, args.checkpoint_path)
