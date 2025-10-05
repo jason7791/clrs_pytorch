@@ -247,8 +247,6 @@ def main():
             try:
                 with open(args.performance_path, 'r') as f:
                     results = json.load(f)
-                if("test_accuracies" in results and len(results["test_accuracies"])>0):
-                    return
                 start_epoch = len(results["train_accuracies"])
                 if results["valid_accuracies"]:
                     best_valid_perf = max(results["valid_accuracies"])
