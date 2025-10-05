@@ -73,53 +73,72 @@ def load_model(model, checkpoint_path):
     else:
         logging.warning(f"No checkpoint found at {checkpoint_path}, starting from scratch.")
 
-def export_tsne(model, device, loader, split_name, perplexity, max_points, outdir):
+def export_tsne(model, device, loader, split_name, perplexity, max_points, outdir, algo_name=None):
     os.makedirs(outdir, exist_ok=True)
     model.eval()
     embs, labels = [], []
 
+    tag = f"{split_name}" + (f"_{algo_name}" if algo_name else "")
+    desc = f"Embeddings ({tag})"
+
     with torch.no_grad():
-        for batch in tqdm(loader, desc=f"Embeddings ({split_name})"):
+        for batch in tqdm(loader, desc=desc):
             batch = batch.to(device)
-            # ensure the model has the accessor we added
+            # grab graph-level embeddings (before prediction head)
             graph_emb = model.get_graph_embeddings(batch) if hasattr(model, "get_graph_embeddings") \
-                         else model._graph_embedding(batch)
+                        else model._graph_embedding(batch)
             embs.append(graph_emb.cpu())
-            # OGB labels may be shape (B, T); take first task if multi-task
+
+            # OGB labels may be (B, T); take first task if multi-task
             y = batch.y
             if y.dim() > 1 and y.size(1) > 1:
                 y = y[:, 0]
             labels.append(y.view(-1).cpu())
 
+    import numpy as np
     embs = torch.cat(embs, dim=0).numpy()
     labels = torch.cat(labels, dim=0).numpy()
 
     # Drop NaN labels (unlabeled)
-    import numpy as np
     valid = ~np.isnan(labels)
     embs, labels = embs[valid], labels[valid]
 
-    # (Optional) subsample for speed
-    if embs.shape[0] > max_points:
-        idx = np.random.RandomState(42).choice(embs.shape[0], size=max_points, replace=False)
-        embs, labels = embs[idx], labels[idx]
+    # Safety checks
+    n = embs.shape[0]
+    if n == 0:
+        logging.warning(f"[t-SNE] No valid points after NaN filtering for {tag}. Skipping export.")
+        return
 
-    tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, init="pca")
+    # (Optional) subsample for speed
+    if n > max_points:
+        idx = np.random.RandomState(42).choice(n, size=max_points, replace=False)
+        embs, labels = embs[idx], labels[idx]
+        n = embs.shape[0]
+
+    # t-SNE requires perplexity < n; clamp if needed
+    eff_perplexity = min(perplexity, max(3, n - 1))
+
+    tsne = TSNE(n_components=2, perplexity=eff_perplexity, random_state=42, init="pca")
     embs_2d = tsne.fit_transform(embs)
 
+    # Filenames with algo suffix
+    npz_path = os.path.join(outdir, f"{split_name}_embeddings{'_' + algo_name if algo_name else ''}_tsne.npz")
+    fig_path = os.path.join(outdir, f"{split_name}{'_' + algo_name if algo_name else ''}_tsne.png")
+
     # Save raw arrays
-    np.savez(os.path.join(outdir, f"{split_name}_embeddings_tsne.npz"),
-             embs_2d=embs_2d, labels=labels)
+    np.savez(npz_path, embs_2d=embs_2d, labels=labels)
 
     # Plot
-    plt.figure(figsize=(6,6))
-    plt.scatter(embs_2d[:,0], embs_2d[:,1], c=labels, alpha=0.7)
-    plt.title(f"t-SNE of Graph Embeddings ({split_name})")
+    plt.figure(figsize=(6, 6))
+    plt.scatter(embs_2d[:, 0], embs_2d[:, 1], c=labels, alpha=0.7)
+    plt.title(f"t-SNE of Graph Embeddings ({tag})")
     plt.xlabel("Dim 1"); plt.ylabel("Dim 2")
-    fig_path = os.path.join(outdir, f"{split_name}_tsne.png")
     plt.savefig(fig_path, bbox_inches="tight", dpi=200)
     plt.close()
-    logging.info(f"Saved t-SNE arrays and figure to: {outdir}")
+
+    logging.info(f"[t-SNE] Saved arrays to: {npz_path}")
+    logging.info(f"[t-SNE] Saved figure to: {fig_path}")
+
 
 # ---------------------- Main Training Pipeline ---------------------- #
 
@@ -156,6 +175,7 @@ def main():
                         help="Max points to sample for t-SNE (for speed)")
     parser.add_argument("--tsne_outdir", type=str, default="tsne",
                         help="Directory to save t-SNE outputs")
+    parser.add_argument("--algo_name", type=str, default=None, help="Algorithm name for t-SNE filename tagging")
 
     args = parser.parse_args()
 
@@ -299,7 +319,8 @@ def main():
             split_name=args.tsne_split,
             perplexity=args.tsne_perplexity,
             max_points=args.tsne_max_points,
-            outdir=args.tsne_outdir
+            outdir=args.tsne_outdir,
+            algo_name=args.algo_name
         )
 
 
