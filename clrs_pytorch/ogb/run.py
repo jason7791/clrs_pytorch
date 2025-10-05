@@ -2,6 +2,8 @@ import os
 import json
 import argparse
 import logging
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
@@ -71,6 +73,54 @@ def load_model(model, checkpoint_path):
     else:
         logging.warning(f"No checkpoint found at {checkpoint_path}, starting from scratch.")
 
+def export_tsne(model, device, loader, split_name, perplexity, max_points, outdir):
+    os.makedirs(outdir, exist_ok=True)
+    model.eval()
+    embs, labels = [], []
+
+    with torch.no_grad():
+        for batch in tqdm(loader, desc=f"Embeddings ({split_name})"):
+            batch = batch.to(device)
+            # ensure the model has the accessor we added
+            graph_emb = model.get_graph_embeddings(batch) if hasattr(model, "get_graph_embeddings") \
+                         else model._graph_embedding(batch)
+            embs.append(graph_emb.cpu())
+            # OGB labels may be shape (B, T); take first task if multi-task
+            y = batch.y
+            if y.dim() > 1 and y.size(1) > 1:
+                y = y[:, 0]
+            labels.append(y.view(-1).cpu())
+
+    embs = torch.cat(embs, dim=0).numpy()
+    labels = torch.cat(labels, dim=0).numpy()
+
+    # Drop NaN labels (unlabeled)
+    import numpy as np
+    valid = ~np.isnan(labels)
+    embs, labels = embs[valid], labels[valid]
+
+    # (Optional) subsample for speed
+    if embs.shape[0] > max_points:
+        idx = np.random.RandomState(42).choice(embs.shape[0], size=max_points, replace=False)
+        embs, labels = embs[idx], labels[idx]
+
+    tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, init="pca")
+    embs_2d = tsne.fit_transform(embs)
+
+    # Save raw arrays
+    np.savez(os.path.join(outdir, f"{split_name}_embeddings_tsne.npz"),
+             embs_2d=embs_2d, labels=labels)
+
+    # Plot
+    plt.figure(figsize=(6,6))
+    plt.scatter(embs_2d[:,0], embs_2d[:,1], c=labels, alpha=0.7)
+    plt.title(f"t-SNE of Graph Embeddings ({split_name})")
+    plt.xlabel("Dim 1"); plt.ylabel("Dim 2")
+    fig_path = os.path.join(outdir, f"{split_name}_tsne.png")
+    plt.savefig(fig_path, bbox_inches="tight", dpi=200)
+    plt.close()
+    logging.info(f"Saved t-SNE arrays and figure to: {outdir}")
+
 # ---------------------- Main Training Pipeline ---------------------- #
 
 
@@ -96,6 +146,17 @@ def main():
     parser.add_argument("--use_pretrain_weights", action="store_true", help="Use pre-trained weights")
     parser.add_argument("--pretrained_weights_path", type=str, default="checkpoints/pretrained.pth", help="Path to pre-trained weights")
     parser.add_argument("--resume", action="store_true", help="Resume training from the last checkpoint and performance results")
+    parser.add_argument("--export_tsne", action="store_true",
+                        help="Export t-SNE of graph embeddings after training")
+    parser.add_argument("--tsne_split", type=str, choices=["train", "valid", "test"], default="test",
+                        help="Which split to export for t-SNE")
+    parser.add_argument("--tsne_perplexity", type=float, default=30.0,
+                        help="t-SNE perplexity")
+    parser.add_argument("--tsne_max_points", type=int, default=5000,
+                        help="Max points to sample for t-SNE (for speed)")
+    parser.add_argument("--tsne_outdir", type=str, default="tsne",
+                        help="Directory to save t-SNE outputs")
+
     args = parser.parse_args()
 
     # Set up logging
@@ -226,7 +287,21 @@ def main():
     load_model(model, args.checkpoint_path)
     test_perf = evaluate(model, device, test_loader, evaluator)
     logging.info(f"Test {metric_key.upper()}: {test_perf[metric_key]:.4f}")
-    test_acc_list.append(test_perf[metric_key])
+    test_acc_list = [test_perf[metric_key]]
+
+    # Optional: export t-SNE
+    if args.export_tsne:
+        split_map = {"train": train_loader, "valid": valid_loader, "test": test_loader}
+        export_tsne(
+            model=model,
+            device=device,
+            loader=split_map[args.tsne_split],
+            split_name=args.tsne_split,
+            perplexity=args.tsne_perplexity,
+            max_points=args.tsne_max_points,
+            outdir=args.tsne_outdir
+        )
+
 
     # Save final results.
     results = {
