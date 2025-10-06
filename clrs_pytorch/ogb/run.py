@@ -136,7 +136,7 @@ def export_tsne(model, device, loader, split_name, perplexity, max_points, outdi
 
     # Plot negatives as faint grey points in the background
     plt.scatter(embs_2d[neg_mask, 0], embs_2d[neg_mask, 1],
-                c='purple', alpha=0.2, s=8, label='Inactive')
+                c='lightpurple', alpha=0.2, s=8, label='Inactive')
 
     # Plot positives as bright gold on top
     plt.scatter(embs_2d[pos_mask, 0], embs_2d[pos_mask, 1],
