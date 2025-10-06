@@ -128,12 +128,42 @@ def export_tsne(model, device, loader, split_name, perplexity, max_points, outdi
     # Save raw arrays
     np.savez(npz_path, embs_2d=embs_2d, labels=labels)
 
-    # Plot
+    # -------- Plot (changed to de-emphasize negatives) --------
     plt.figure(figsize=(6, 6))
-    plt.scatter(embs_2d[:, 0], embs_2d[:, 1], c=labels, alpha=0.7)
+
+    # Detect binary labels and build masks  # <<< changed
+    uniq = np.unique(labels)
+    is_binary = (len(uniq) == 2)
+    if is_binary:
+        # Decide which value is "positive" (active). In OGB this is usually 1.  # <<< changed
+        pos_val = 1 if 1 in uniq else uniq.max()
+        pos_mask = (labels == pos_val)
+        neg_mask = ~pos_mask
+
+        # Plot negatives first with lower alpha so positives remain visible on top  # <<< changed
+        plt.scatter(
+            embs_2d[neg_mask, 0], embs_2d[neg_mask, 1],
+            c='#4B0082', alpha=0.15, s=8, edgecolors='none', label='Inactive', zorder=1
+        )
+        # Plot positives with higher alpha and slightly larger size  # <<< changed
+        plt.scatter(
+            embs_2d[pos_mask, 0], embs_2d[pos_mask, 1],
+            c='#F1C40F', alpha=0.95, s=14, edgecolors='k', linewidths=0.15,
+            label='Active', zorder=2
+        )
+        # Optional, tidy legend  # <<< changed
+        leg = plt.legend(frameon=False, loc='best')
+        for lh in leg.legendHandles:
+            lh.set_alpha(1.0)
+    else:
+        # Fallback to original behavior for non-binary tasks  # <<< changed
+        sc = plt.scatter(embs_2d[:, 0], embs_2d[:, 1], c=labels, alpha=0.7, s=10, edgecolors='none')
+        plt.colorbar(sc, shrink=0.8)
+
     plt.title(f"t-SNE of Graph Embeddings ({tag})")
     plt.xlabel("Dim 1"); plt.ylabel("Dim 2")
-    plt.savefig(fig_path, bbox_inches="tight", dpi=200)
+    plt.tight_layout()  # <<< changed
+    plt.savefig(fig_path, bbox_inches="tight", dpi=300)  # higher DPI  # <<< changed
     plt.close()
 
     logging.info(f"[t-SNE] Saved arrays to: {npz_path}")
