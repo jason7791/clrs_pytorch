@@ -136,11 +136,11 @@ def export_tsne(model, device, loader, split_name, perplexity, max_points, outdi
 
     # Plot negatives as faint grey points in the background
     plt.scatter(embs_2d[neg_mask, 0], embs_2d[neg_mask, 1],
-                c='#301934', alpha=0.9, s=8, label='Inactive')
+                c='#301934', alpha=0.9, s=18, edgecolors='k',  label='Inactive')
 
     # Plot positives as bright gold on top
     plt.scatter(embs_2d[pos_mask, 0], embs_2d[pos_mask, 1],
-                c='#FFD700', alpha=0.9, s=18, edgecolors='k', linewidths=0.3, label='Active')
+                c='#FFD700', alpha=0.9, s=8, linewidths=0.3, label='Active')
 
     plt.title(f"t-SNE of Graph Embeddings ({tag})")
     plt.xlabel("Dim 1")
