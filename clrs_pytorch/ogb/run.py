@@ -129,16 +129,26 @@ def export_tsne(model, device, loader, split_name, perplexity, max_points, outdi
     np.savez(npz_path, embs_2d=embs_2d, labels=labels)
 
     # Plot
+    # --- UPDATED PLOTTING SECTION ---
     plt.figure(figsize=(6, 6))
     neg_mask = labels == 0
     pos_mask = labels == 1
-    plt.scatter(embs_2d[neg_mask, 0], embs_2d[neg_mask, 1], c='purple', alpha=0.2, s=8, label='Inactive')
-    plt.scatter(embs_2d[pos_mask, 0], embs_2d[pos_mask, 1], c='gold', alpha=0.8, s=8, label='Active')
+
+    # Plot negatives as faint grey points in the background
+    plt.scatter(embs_2d[neg_mask, 0], embs_2d[neg_mask, 1],
+                c='lightgrey', alpha=0.2, s=8, label='Inactive')
+
+    # Plot positives as bright gold on top
+    plt.scatter(embs_2d[pos_mask, 0], embs_2d[pos_mask, 1],
+                c='#FFD700', alpha=0.9, s=18, edgecolors='k', linewidths=0.3, label='Active')
 
     plt.title(f"t-SNE of Graph Embeddings ({tag})")
-    plt.xlabel("Dim 1"); plt.ylabel("Dim 2")
-    plt.savefig(fig_path, bbox_inches="tight", dpi=200)
+    plt.xlabel("Dim 1")
+    plt.ylabel("Dim 2")
+    plt.legend(frameon=False, loc='best')
+    plt.savefig(fig_path, bbox_inches="tight", dpi=300)
     plt.close()
+
 
     logging.info(f"[t-SNE] Saved arrays to: {npz_path}")
     logging.info(f"[t-SNE] Saved figure to: {fig_path}")
